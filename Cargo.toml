@@ -1,0 +1,16 @@
+[package]
+name = "nix-druid"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde = {version = "1.0.139", features = [ "derive" ]}
+serde_json = "1.0.82"
+# druid = "0.7.0"
+
+druid-widget-nursery = { git = "https://github.com/linebender/druid-widget-nursery" }
+[dependencies.druid]
+git = "https://github.com/linebender/druid"
+rev = "fc05e965c85fced8720c655685e02478e0530e94"
