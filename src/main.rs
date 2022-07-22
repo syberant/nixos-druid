@@ -1,8 +1,6 @@
 mod parse;
 
-use parse::NixValue;
-
-// Copyright 2019 The Druid Authors.
+// Copyright 2022 The Druid Authors, Sybrand Aarnoutse.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,26 +14,25 @@ use parse::NixValue;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Demos advanced tree widget and tree manipulations.
-
-use std::fmt;
-
 // This is a pseudo tree file manager (no interaction with your actual
 // filesystem whatsoever). It's intended to use most of the features of
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
+use std::fmt;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 
+use parse::{NixOption, NixValue};
+
 use druid::im::Vector;
 use druid::kurbo::Size;
-use druid::widget::{Button, Flex, Label, Scroll, Split, TextBox};
+use druid::widget::{Button, Flex, Label, LensWrap, Scroll, Split, TextBox};
 use druid::{
     AppLauncher, ArcStr, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
-    LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Target, UpdateCtx, Widget,
+    LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Selector, Target, UpdateCtx, Widget,
     WidgetExt, WidgetId, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{
@@ -44,6 +41,9 @@ use druid_widget_nursery::tree::{
 };
 
 use druid_widget_nursery::selectors;
+
+/// Open this option in the option editor
+const FOCUS_OPTION: Selector<NodeType> = Selector::new("main.focus-option");
 
 selectors! {
     /// Set the focus to current textbox
@@ -74,23 +74,51 @@ enum FSNodeType {
     Directory,
 }
 
-#[derive(Clone, Debug, PartialEq, Data)]
-enum FileType {
+#[derive(Clone, PartialEq, Data, Debug)]
+enum NodeType {
+    Set,
+    Option(LeafOption),
     Unknown,
-    Rust,
-    Toml,
-    Python,
 }
 
-impl Display for FileType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use FileType::*;
-        match self {
-            Unknown => write!(f, "📃"),
-            Rust => write!(f, "🦀"),
-            Toml => write!(f, "⚙️"),
-            Python => write!(f, "🐍"),
+// TODO: Remove hacky implementation of PartialEq
+#[derive(Clone, PartialEq, Data, Debug)]
+struct LeafOption {
+    description: String,
+    type_name: String,
+}
+
+enum OptionType {
+    // Collection types
+    AttrsOf,
+    ListOf,
+
+    // Leaf/simple types
+    Int,
+    Float,
+    Bool,
+    Path,
+    Package,
+    String,
+    Str,
+
+    // Miscellaneous types
+    Unknown,
+    Submodule,
+}
+
+impl From<NixOption> for LeafOption {
+    fn from(opt: NixOption) -> Self {
+        Self {
+            description: opt.description,
+            type_name: opt.r#type.to_string(),
         }
+    }
+}
+
+impl std::fmt::Display for LeafOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Description: {}\n\nType: {}", self.description, self.type_name)
     }
 }
 
@@ -104,8 +132,8 @@ struct FSNode {
     children: Vector<Arc<FSNode>>,
     /// Explicit storage of the type (file or directory)
     node_type: FSNodeType,
-    /// File type to display cute animals next to the files
-    filetype: FileType,
+    /// Option type
+    option_type: NodeType,
     /// Keep track of the expanded state
     expanded: bool,
     /// Keep track of the chroot state (see TreeNode::get_chroot for description of the chroot mechanism)
@@ -114,13 +142,13 @@ struct FSNode {
 
 /// We use FSNode as a tree node, implementing the TreeNode trait.
 impl FSNode {
-    fn new(name: String) -> Self {
+    fn new(name: String, option: LeafOption) -> Self {
         FSNode {
             name: ArcStr::from(name),
             editing: false,
             children: Vector::new(),
             node_type: FSNodeType::File,
-            filetype: FileType::Unknown,
+            option_type: NodeType::Option(option),
             expanded: false,
             chroot_: None,
         }
@@ -132,7 +160,7 @@ impl FSNode {
             editing: false,
             children: Vector::new(),
             node_type: FSNodeType::Directory,
-            filetype: FileType::Unknown,
+            option_type: NodeType::Set,
             expanded: false,
             chroot_: None,
         }
@@ -171,24 +199,6 @@ impl FSNode {
     fn ref_add_child(&mut self, child: Self) {
         self.children.push_back(Arc::new(child));
         self.update();
-    }
-
-    fn get_filetype(&mut self) {
-        // A quick and dirty filetype detection to add eye-candy to the demo.
-        use FileType::*;
-        self.filetype = {
-            let fname = self.name.to_string();
-            let ext = Path::new(&fname).extension().and_then(OsStr::to_str);
-            match ext {
-                None => Unknown,
-                Some(ext) => match ext {
-                    "rs" => Rust,
-                    "py" => Python,
-                    "toml" => Toml,
-                    _ => Unknown,
-                },
-            }
-        };
     }
 }
 
@@ -239,7 +249,6 @@ impl TreeNode for FSNode {
 /// expand directories.
 struct FSOpener {
     label: WidgetPod<String, Label<String>>,
-    filetype: FileType,
     chroot_status: ChrootStatus,
 }
 
@@ -261,7 +270,7 @@ impl FSOpener {
             }
             .to_owned()
         } else {
-            format!("{}", self.filetype)
+            "⚙️".to_owned()
         }
     }
 }
@@ -311,12 +320,7 @@ impl Widget<FSNode> for FSOpener {
             let label = self.label(data);
             self.label.update(ctx, &label, env);
         }
-        if !data.is_branch() {
-            if data.filetype != self.filetype {
-                self.filetype = data.filetype.clone();
-                self.label.update(ctx, &self.label(data), env);
-            }
-        } else {
+        if data.is_branch() {
             self.label.update(ctx, &self.label(data), env);
         }
     }
@@ -393,7 +397,6 @@ pub struct FSNodeWidget {
     edit_branch: WidgetPod<FSNode, Flex<FSNode>>,
     normal_branch: WidgetPod<FSNode, Flex<FSNode>>,
     editing: bool,
-    file_type: Option<FileType>,
 }
 
 impl FSNodeWidget {
@@ -420,7 +423,6 @@ impl FSNodeWidget {
                 Label::dynamic(|data: &FSNode, _env| String::from(data.name.as_ref())),
             )),
             editing: false,
-            file_type: None,
         }
     }
 }
@@ -432,7 +434,7 @@ impl Widget<FSNode> for FSNodeWidget {
         // (i.e. I'm tired documenting, I'm not even sure how much this may change in a near future.)
         let new_event = match event {
             Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                println!("Mouse clicked on {}", data.name);
+                ctx.submit_notification(FOCUS_OPTION.with(data.option_type.clone()));
 
                 // Event handled, don't propagate
                 None
@@ -455,27 +457,22 @@ impl Widget<FSNode> for FSNodeWidget {
                 None
             }
             Event::Command(cmd) if cmd.is(UPDATE_FILE) => {
-                data.get_filetype();
-                self.file_type = Some(data.filetype.clone());
                 ctx.submit_notification(TREE_NOTIFY_PARENT.with(UPDATE_DIR_VIEW));
                 None
             }
             Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => {
-                if self.file_type.is_none() {
-                    data.get_filetype();
-                    self.file_type = Some(data.filetype.clone());
-                }
                 if self.editing {
                     ctx.set_focus(self.edit_widget_id);
                 }
                 None
             }
             Event::Command(cmd) if cmd.is(NEW_FILE) => {
-                data.ref_add_child({
-                    let mut child = FSNode::new(String::new());
-                    child.editing = true;
-                    child
-                });
+                // data.ref_add_child({
+                    // let mut child = FSNode::new(String::new(), "empty description".to_string());
+                    // child.editing = true;
+                    // child
+                // });
+                eprintln!("Adding childs is temporarily impossible");
                 ctx.submit_notification(TREE_OPEN);
                 None
             }
@@ -595,7 +592,52 @@ impl UiData {
     }
 }
 
-fn ui_builder() -> impl Widget<FSNode> {
+struct NotificationHandlingWidget<T> {
+    inner: T,
+}
+
+impl<T> NotificationHandlingWidget<T> {
+    fn new(inner: T) -> Self {
+        Self { inner }
+    }
+}
+
+impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut UiData, env: &Env) {
+        let event = match event {
+            Event::Notification(notif) if notif.is(FOCUS_OPTION) => {
+                if let Some(NodeType::Option(opt)) = notif.get(FOCUS_OPTION) {
+                    data.text = opt.to_string();
+                }
+
+                // Stop propagating to ancestors
+                ctx.set_handled();
+                None
+            },
+            x => Some(x),
+        };
+
+        if let Some(ev) = event {
+            self.inner.event(ctx, ev, data, env);
+        }
+    }
+
+    // Just pass all these function calls directly to the inner widget
+    fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &UiData, env: &Env) {
+        self.inner.lifecycle(ctx, event, data, env);
+    }
+    fn update(&mut self, ctx: &mut UpdateCtx, old_data: &UiData, data: &UiData, env: &Env) {
+        self.inner.update(ctx, old_data, data, env);
+    }
+    fn layout(&mut self, ctx: &mut LayoutCtx, bc: &BoxConstraints, data: &UiData, env: &Env) -> Size {
+        self.inner.layout(ctx, bc, data, env)
+    }
+    fn paint(&mut self, ctx: &mut PaintCtx, data: &UiData, env: &Env) {
+        self.inner.paint(ctx, data, env);
+    }
+}
+
+fn ui_builder() -> impl Widget<UiData> {
     let tree = Tree::new(
         || {
             // Our items are editable. If editing is true, we show a TextBox of the name,
@@ -607,17 +649,19 @@ fn ui_builder() -> impl Widget<FSNode> {
     )
     .with_opener(|| FSOpener {
         label: WidgetPod::new(Label::dynamic(|st: &String, _| st.clone())),
-        filetype: FileType::Unknown,
         chroot_status: ChrootStatus::NO,
-    });
+    }).lens(UiData::tree);
 
-    Split::columns(Scroll::new(tree), Label::new("Hello world!"))
+    let wrapped_tree = Scroll::new(tree);
+    let label = Label::dynamic(|data: &String, _| data.to_string()).lens(UiData::text);
+
+    NotificationHandlingWidget::new(Split::columns(wrapped_tree, label))
 }
 
 fn create_node(value: &NixValue, name: String) -> FSNode {
     match value {
         NixValue::Option(o) => {
-            return FSNode::new(name);
+            return FSNode::new(name, LeafOption::from(o.clone()));
         }
         NixValue::Set(s) => {
             let mut parent = FSNode::new_dir(name);
@@ -639,11 +683,11 @@ pub fn main() {
     let root_name = "NixOS Configuration".to_string();
     let option_tree = create_node(&root, root_name);
 
-    // let data = UiData::new(option_tree);
+    let data = UiData::new(option_tree);
 
     // start the application
     AppLauncher::with_window(main_window)
         .log_to_console()
-        .launch(option_tree)
+        .launch(data)
         .expect("launch failed");
 }

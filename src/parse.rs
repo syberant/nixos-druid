@@ -7,19 +7,19 @@ use std::fs::File;
 use std::io::BufReader;
 
 #[derive(Deserialize, Debug, Clone)]
-struct NixSubmodule {
+pub struct NixSubmodule {
     _submodule: bool,
     options: NixSet,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 #[allow(non_snake_case)]
-struct NixType {
+pub struct NixType {
     _type: bool,
     description: String,
     functorName: String,
     name: String,
-    nestedTypes: Value,
+    nestedTypes: HashMap<String,NixTypeValue>,
 
     #[serde(default)]
     functorPayload: Vec<Value>,
@@ -27,7 +27,7 @@ struct NixType {
 
 #[derive(Deserialize, Debug, Clone)]
 #[allow(non_snake_case)]
-struct NixInfiniteRecursion {
+pub struct NixInfiniteRecursion {
     _infiniteRecursion: bool,
     #[serde(default)]
     _standard: bool,
@@ -39,17 +39,29 @@ struct NixInfiniteRecursion {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(untagged)]
-enum NixTypeValue {
+pub enum NixTypeValue {
     Type(NixType),
     Submodule(NixSubmodule),
     InfiniteRecursion(NixInfiniteRecursion),
 }
 
+impl std::fmt::Display for NixTypeValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use NixTypeValue::*;
+
+        match self {
+            Type(t) => write!(f, "{}", t.description),
+            Submodule(_) => write!(f, "submodule"),
+            InfiniteRecursion(_) => write!(f, "infinite recursion error"),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct NixOption {
     _option: bool,
-    description: String,
-    r#type: NixTypeValue,
+    pub description: String,
+    pub r#type: NixTypeValue,
 }
 
 #[derive(Deserialize, Debug, Clone)]
