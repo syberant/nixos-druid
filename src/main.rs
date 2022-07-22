@@ -18,22 +18,22 @@ mod parse;
 // filesystem whatsoever). It's intended to use most of the features of
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
-use std::fmt;
 use std::cmp::Ordering;
 use std::ffi::OsStr;
+use std::fmt;
 use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 
-use parse::{NixOption, NixValue};
+use parse::{NixOption, NixSet, NixTypeValue, NixValue};
 
 use druid::im::Vector;
 use druid::kurbo::Size;
 use druid::widget::{Button, Flex, Label, LensWrap, Scroll, Split, TextBox};
 use druid::{
     AppLauncher, ArcStr, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
-    LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Selector, Target, UpdateCtx, Widget,
-    WidgetExt, WidgetId, WidgetPod, WindowDesc,
+    LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Selector, Target, UpdateCtx,
+    Widget, WidgetExt, WidgetId, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{
     ChrootStatus, Tree, TreeNode, TREE_ACTIVATE_NODE, TREE_CHILD_SHOW, TREE_CHROOT, TREE_CHROOT_UP,
@@ -68,43 +68,17 @@ selectors! {
     UPDATE_FILE,
 }
 
-#[derive(Clone, Debug, PartialEq, Data)]
-enum FSNodeType {
-    File,
-    Directory,
-}
-
-#[derive(Clone, PartialEq, Data, Debug)]
+#[derive(Clone, Data, Debug)]
 enum NodeType {
+    DocumentedSet(LeafOption),
     Set,
     Option(LeafOption),
-    Unknown,
 }
 
-// TODO: Remove hacky implementation of PartialEq
-#[derive(Clone, PartialEq, Data, Debug)]
+#[derive(Clone, Data, Debug)]
 struct LeafOption {
     description: String,
     type_name: String,
-}
-
-enum OptionType {
-    // Collection types
-    AttrsOf,
-    ListOf,
-
-    // Leaf/simple types
-    Int,
-    Float,
-    Bool,
-    Path,
-    Package,
-    String,
-    Str,
-
-    // Miscellaneous types
-    Unknown,
-    Submodule,
 }
 
 impl From<NixOption> for LeafOption {
@@ -118,7 +92,11 @@ impl From<NixOption> for LeafOption {
 
 impl std::fmt::Display for LeafOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Description: {}\n\nType: {}", self.description, self.type_name)
+        write!(
+            f,
+            "Description: {}\n\nType: {}",
+            self.description, self.type_name
+        )
     }
 }
 
@@ -131,9 +109,7 @@ struct FSNode {
     /// Children FSNodes. We wrap them in an Arc to avoid a ugly side effect of Vector (discussed in examples/tree.rs)
     children: Vector<Arc<FSNode>>,
     /// Explicit storage of the type (file or directory)
-    node_type: FSNodeType,
-    /// Option type
-    option_type: NodeType,
+    node_type: NodeType,
     /// Keep track of the expanded state
     expanded: bool,
     /// Keep track of the chroot state (see TreeNode::get_chroot for description of the chroot mechanism)
@@ -147,39 +123,73 @@ impl FSNode {
             name: ArcStr::from(name),
             editing: false,
             children: Vector::new(),
-            node_type: FSNodeType::File,
-            option_type: NodeType::Option(option),
+            node_type: NodeType::Option(option),
             expanded: false,
             chroot_: None,
         }
     }
 
-    fn new_dir(name: String) -> Self {
-        FSNode {
+    fn new_dir(name: String, children: &NixSet) -> Self {
+        let children = children.into_iter().map(|(k,v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string()))).collect();
+
+        let mut node = FSNode {
             name: ArcStr::from(name),
             editing: false,
-            children: Vector::new(),
-            node_type: FSNodeType::Directory,
-            option_type: NodeType::Set,
+            children,
+            node_type: NodeType::Set,
             expanded: false,
             chroot_: None,
-        }
+        };
+        node.update();
+        return node;
+    }
+
+    fn new_documented(name: String, option: LeafOption, children: &NixSet) -> Self {
+        let children = children.into_iter().map(|(k,v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string()))).collect();
+
+        let mut node = FSNode {
+            name: ArcStr::from(name),
+            editing: false,
+            children,
+            node_type: NodeType::DocumentedSet(option),
+            expanded: false,
+            chroot_: None,
+        };
+        node.update();
+        return node;
     }
 
     /// The sorting is directories first and alphanumeric order.
     /// This is called upon insertion or update of a child, by the
     /// FSNodeWidget.
     fn sort(&mut self) {
+        use Ordering::*;
+
         self.children
-            .sort_by(|a, b| match (&a.node_type, &b.node_type) {
-                // sort directory first, then by name
-                (FSNodeType::File, FSNodeType::Directory) => Ordering::Greater,
-                (FSNodeType::Directory, FSNodeType::File) => Ordering::Less,
-                _ => match (a.name.as_ref(), b.name.as_ref()) {
-                    (_, "") => Ordering::Less,
-                    ("", _) => Ordering::Greater,
+            .sort_by(|a, b|
+                match (&a.node_type, &b.node_type) {
+                    (NodeType::Option(_), NodeType::Set) => Greater,
+                    (NodeType::Option(_), NodeType::DocumentedSet(_)) => Greater,
+                    (NodeType::Set, NodeType::Option(_)) => Less,
+                    (NodeType::DocumentedSet(_), NodeType::Option(_)) => Less,
+
+                    _ => match (a.name.as_ref(), b.name.as_ref()) {
+                    (_, "") => Less,
+                    ("", _) => Greater,
+                    ("enable", _) => Less,
+                    (_, "enable") => Greater,
                     _ => a.name.cmp(&b.name),
                 },
+            // match a.node_type.cmp(&b.node_type) {
+                // // sort directory first, then by name
+                // Equal => match (a.name.as_ref(), b.name.as_ref()) {
+                    // (_, "") => Ordering::Less,
+                    // ("", _) => Ordering::Greater,
+                    // ("enable", _) => Ordering::Less,
+                    // (_, "enable") => Ordering::Greater,
+                    // _ => a.name.cmp(&b.name),
+                // },
+                // other => other,
             });
     }
 
@@ -226,8 +236,13 @@ impl TreeNode for FSNode {
     }
 
     fn is_branch(&self) -> bool {
-        // The default implementation would consider empty dirs as files.
-        matches!(self.node_type, FSNodeType::Directory)
+        use NodeType::*;
+
+        match &self.node_type {
+            Set => true,
+            DocumentedSet(_) => true,
+            Option(_) => false,
+        }
     }
 
     fn rm_child(&mut self, index: usize) {
@@ -434,7 +449,7 @@ impl Widget<FSNode> for FSNodeWidget {
         // (i.e. I'm tired documenting, I'm not even sure how much this may change in a near future.)
         let new_event = match event {
             Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                ctx.submit_notification(FOCUS_OPTION.with(data.option_type.clone()));
+                ctx.submit_notification(FOCUS_OPTION.with(data.node_type.clone()));
 
                 // Event handled, don't propagate
                 None
@@ -468,20 +483,21 @@ impl Widget<FSNode> for FSNodeWidget {
             }
             Event::Command(cmd) if cmd.is(NEW_FILE) => {
                 // data.ref_add_child({
-                    // let mut child = FSNode::new(String::new(), "empty description".to_string());
-                    // child.editing = true;
-                    // child
+                // let mut child = FSNode::new(String::new(), "empty description".to_string());
+                // child.editing = true;
+                // child
                 // });
                 eprintln!("Adding childs is temporarily impossible");
                 ctx.submit_notification(TREE_OPEN);
                 None
             }
             Event::Command(cmd) if cmd.is(NEW_DIR) => {
-                data.ref_add_child({
-                    let mut child = FSNode::new_dir(String::new());
-                    child.editing = true;
-                    child
-                });
+                // data.ref_add_child({
+                // let mut child = FSNode::new_dir(String::new());
+                // child.editing = true;
+                // child
+                // });
+                eprintln!("Adding childs is temporarily impossible");
                 ctx.submit_notification(TREE_OPEN);
                 None
             }
@@ -609,11 +625,14 @@ impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
                 if let Some(NodeType::Option(opt)) = notif.get(FOCUS_OPTION) {
                     data.text = opt.to_string();
                 }
+                if let Some(NodeType::DocumentedSet(opt)) = notif.get(FOCUS_OPTION) {
+                    data.text = opt.to_string();
+                }
 
                 // Stop propagating to ancestors
                 ctx.set_handled();
                 None
-            },
+            }
             x => Some(x),
         };
 
@@ -629,7 +648,13 @@ impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
     fn update(&mut self, ctx: &mut UpdateCtx, old_data: &UiData, data: &UiData, env: &Env) {
         self.inner.update(ctx, old_data, data, env);
     }
-    fn layout(&mut self, ctx: &mut LayoutCtx, bc: &BoxConstraints, data: &UiData, env: &Env) -> Size {
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        bc: &BoxConstraints,
+        data: &UiData,
+        env: &Env,
+    ) -> Size {
         self.inner.layout(ctx, bc, data, env)
     }
     fn paint(&mut self, ctx: &mut PaintCtx, data: &UiData, env: &Env) {
@@ -650,7 +675,8 @@ fn ui_builder() -> impl Widget<UiData> {
     .with_opener(|| FSOpener {
         label: WidgetPod::new(Label::dynamic(|st: &String, _| st.clone())),
         chroot_status: ChrootStatus::NO,
-    }).lens(UiData::tree);
+    })
+    .lens(UiData::tree);
 
     let wrapped_tree = Scroll::new(tree);
     let label = Label::dynamic(|data: &String, _| data.to_string()).lens(UiData::text);
@@ -661,15 +687,24 @@ fn ui_builder() -> impl Widget<UiData> {
 fn create_node(value: &NixValue, name: String) -> FSNode {
     match value {
         NixValue::Option(o) => {
-            return FSNode::new(name, LeafOption::from(o.clone()));
-        }
-        NixValue::Set(s) => {
-            let mut parent = FSNode::new_dir(name);
-            for (k, v) in s {
-                parent = parent.add_child(create_node(v, k.to_string()))
+            let head = LeafOption::from(o.clone());
+
+            match o.r#type {
+                NixTypeValue::Type(ref t) => match t.description.as_str() {
+                    "attribute set of submodules" | "list of submodules" | "null or submodule" => {
+                        FSNode::new_documented(
+                            name,
+                            head,
+                            &t.nestedTypes["elemType"].get_submodule().unwrap().options,
+                        )
+                    }
+                    _ => FSNode::new(name, head),
+                },
+                NixTypeValue::Submodule(ref s) => FSNode::new_documented(name, head, &s.options),
+                _ => FSNode::new(name, head),
             }
-            return parent;
         }
+        NixValue::Set(s) => FSNode::new_dir(name, s),
     }
 }
 
@@ -687,7 +722,7 @@ pub fn main() {
 
     // start the application
     AppLauncher::with_window(main_window)
-        .log_to_console()
+        // .log_to_console()
         .launch(data)
         .expect("launch failed");
 }

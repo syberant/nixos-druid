@@ -9,17 +9,17 @@ use std::io::BufReader;
 #[derive(Deserialize, Debug, Clone)]
 pub struct NixSubmodule {
     _submodule: bool,
-    options: NixSet,
+    pub options: NixSet,
 }
 
 #[derive(Deserialize, Debug, Clone)]
 #[allow(non_snake_case)]
 pub struct NixType {
     _type: bool,
-    description: String,
+    pub description: String,
     functorName: String,
     name: String,
-    nestedTypes: HashMap<String,NixTypeValue>,
+    pub nestedTypes: HashMap<String,NixTypeValue>,
 
     #[serde(default)]
     functorPayload: Vec<Value>,
@@ -43,6 +43,15 @@ pub enum NixTypeValue {
     Type(NixType),
     Submodule(NixSubmodule),
     InfiniteRecursion(NixInfiniteRecursion),
+}
+
+impl NixTypeValue {
+    pub fn get_submodule(&self) -> Option<&NixSubmodule> {
+        match self {
+            NixTypeValue::Submodule(s) => Some(s),
+            _ => None,
+        }
+    }
 }
 
 impl std::fmt::Display for NixTypeValue {
@@ -71,7 +80,7 @@ pub enum NixValue {
     Set(NixSet),
 }
 
-type NixSet = HashMap<String, Box<NixValue>>;
+pub type NixSet = HashMap<String, Box<NixValue>>;
 
 pub fn get_root() -> NixValue {
     let file = File::open("/tmp/nixos.json").unwrap();
