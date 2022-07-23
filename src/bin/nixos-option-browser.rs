@@ -1,5 +1,3 @@
-mod parse;
-
 // Copyright 2022 The Druid Authors, Sybrand Aarnoutse.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,7 +23,7 @@ use std::fmt::Display;
 use std::path::Path;
 use std::sync::Arc;
 
-use parse::{NixOption, NixSet, NixTypeValue, NixValue};
+use nix_druid::parse::{NixOption, NixSet, NixTypeValue, NixValue};
 
 use druid::im::Vector;
 use druid::kurbo::Size;
@@ -719,7 +717,7 @@ pub fn main() {
         .window_size((600.0, 600.0))
         .title(LocalizedString::new("tree-demo-window-title").with_placeholder("Tree Demo"));
 
-    let root = parse::get_root();
+    let root = nix_druid::parse::get_root();
     let root_name = "NixOS Configuration".to_string();
     let option_tree = create_node(&root, root_name);
 
