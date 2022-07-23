@@ -18,7 +18,7 @@ pub struct NixType {
     _type: bool,
     pub description: String,
     functorName: String,
-    name: String,
+    pub name: String,
     pub nestedTypes: HashMap<String,NixTypeValue>,
 
     #[serde(default)]
