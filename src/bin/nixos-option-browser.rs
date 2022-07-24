@@ -17,17 +17,13 @@
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
 use std::cmp::Ordering;
-use std::ffi::OsStr;
-use std::fmt;
-use std::fmt::Display;
-use std::path::Path;
 use std::sync::Arc;
 
 use nix_druid::parse::{NixOption, NixSet, NixTypeValue, NixValue};
 
 use druid::im::Vector;
 use druid::kurbo::Size;
-use druid::widget::{Button, Flex, Label, LensWrap, Scroll, Split, TextBox};
+use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{
     AppLauncher, ArcStr, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
     LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Selector, Target, UpdateCtx,
@@ -35,7 +31,7 @@ use druid::{
 };
 use druid_widget_nursery::tree::{
     ChrootStatus, Tree, TreeNode, TREE_ACTIVATE_NODE, TREE_CHILD_SHOW, TREE_CHROOT, TREE_CHROOT_UP,
-    TREE_NODE_REMOVE, TREE_NOTIFY_CHROOT, TREE_NOTIFY_PARENT, TREE_OPEN,
+    TREE_NOTIFY_CHROOT, TREE_NOTIFY_PARENT,
 };
 
 use druid_widget_nursery::selectors;
@@ -44,20 +40,6 @@ use druid_widget_nursery::selectors;
 const FOCUS_OPTION: Selector<NodeType> = Selector::new("main.focus-option");
 
 selectors! {
-    /// Set the focus to current textbox
-    FOCUS_EDIT_BOX,
-    /// Command to tell a directory to create a new file
-    NEW_FILE,
-    /// Command to tell a directory to create a new subdir
-    NEW_DIR,
-    /// Start a rename
-    RENAME,
-    /// Delete the node
-    DELETE,
-    /// Tell that the edition of a node name name (on creation/rename) is now completed
-    EDIT_FINISHED,
-    /// Tell that the edition of a node name name (on creation/rename) has just started
-    EDIT_STARTED,
     /// Command sent by the context menu to chroot to the targeted directory
     CHROOT,
 
@@ -102,8 +84,6 @@ impl std::fmt::Display for LeafOption {
 struct FSNode {
     /// Name of the node, that is diplayed in the tree
     name: ArcStr,
-    /// Wether the user is currently editing the node name
-    editing: bool,
     /// Children FSNodes. We wrap them in an Arc to avoid a ugly side effect of Vector (discussed in examples/tree.rs)
     children: Vector<Arc<FSNode>>,
     /// Explicit storage of the type (file or directory)
@@ -119,7 +99,6 @@ impl FSNode {
     fn new(name: String, option: LeafOption) -> Self {
         FSNode {
             name: ArcStr::from(name),
-            editing: false,
             children: Vector::new(),
             node_type: NodeType::Option(option),
             expanded: false,
@@ -132,7 +111,6 @@ impl FSNode {
 
         let mut node = FSNode {
             name: ArcStr::from(name),
-            editing: false,
             children,
             node_type: NodeType::Set,
             expanded: false,
@@ -147,7 +125,6 @@ impl FSNode {
 
         let mut node = FSNode {
             name: ArcStr::from(name),
-            editing: false,
             children,
             node_type: NodeType::DocumentedSet(option),
             expanded: false,
@@ -178,16 +155,6 @@ impl FSNode {
                     (_, "enable") => Greater,
                     _ => a.name.cmp(&b.name),
                 },
-            // match a.node_type.cmp(&b.node_type) {
-                // // sort directory first, then by name
-                // Equal => match (a.name.as_ref(), b.name.as_ref()) {
-                    // (_, "") => Ordering::Less,
-                    // ("", _) => Ordering::Greater,
-                    // ("enable", _) => Ordering::Less,
-                    // (_, "enable") => Ordering::Greater,
-                    // _ => a.name.cmp(&b.name),
-                // },
-                // other => other,
             });
     }
 
@@ -196,17 +163,6 @@ impl FSNode {
         // TODO: we should update the virtual root here, if its index has changed.
         //       Or... maybe... the whole chroot system is to be redesigned, even
         //       in the Tree widget :/
-    }
-
-    fn add_child(mut self, child: Self) -> Self {
-        self.children.push_back(Arc::new(child));
-        self.update();
-        self
-    }
-
-    fn ref_add_child(&mut self, child: Self) {
-        self.children.push_back(Arc::new(child));
-        self.update();
     }
 }
 
@@ -364,28 +320,6 @@ impl Widget<FSNode> for FSOpener {
 
 fn make_dir_context_menu(widget_id: WidgetId) -> Menu<FSNode> {
     Menu::empty()
-        .entry(MenuItem::new(LocalizedString::new("New File")).on_activate(
-            move |ctx, _data: &mut FSNode, _env| {
-                ctx.submit_command(NEW_FILE.to(Target::Widget(widget_id)));
-            },
-        ))
-        .entry(
-            MenuItem::new(LocalizedString::new("New Sub Directory")).on_activate(
-                move |ctx, _data: &mut FSNode, _env| {
-                    ctx.submit_command(NEW_DIR.to(Target::Widget(widget_id)));
-                },
-            ),
-        )
-        .entry(MenuItem::new(LocalizedString::new("Delete")).on_activate(
-            move |ctx, _data: &mut FSNode, _env| {
-                ctx.submit_command(DELETE.to(Target::Widget(widget_id)));
-            },
-        ))
-        .entry(MenuItem::new(LocalizedString::new("Rename")).on_activate(
-            move |ctx, _data: &mut FSNode, _env| {
-                ctx.submit_command(RENAME.to(Target::Widget(widget_id)));
-            },
-        ))
         .entry(MenuItem::new(LocalizedString::new("Chroot")).on_activate(
             move |ctx, _data: &mut FSNode, _env| {
                 ctx.submit_command(CHROOT.to(Target::Widget(widget_id)));
@@ -393,54 +327,24 @@ fn make_dir_context_menu(widget_id: WidgetId) -> Menu<FSNode> {
         ))
 }
 
-fn make_file_context_menu(widget_id: WidgetId) -> Menu<FSNode> {
+fn make_file_context_menu(_widget_id: WidgetId) -> Menu<FSNode> {
     Menu::empty()
-        .entry(MenuItem::new(LocalizedString::new("Delete")).on_activate(
-            move |ctx, _data: &mut FSNode, _env| {
-                ctx.submit_command(DELETE.to(Target::Widget(widget_id)));
-            },
-        ))
-        .entry(MenuItem::new(LocalizedString::new("Rename")).on_activate(
-            move |ctx, _data: &mut FSNode, _env| {
-                ctx.submit_command(RENAME.to(Target::Widget(widget_id)));
-            },
-        ))
 }
 
 /// THis is the user widget we pass to the Tree constructor, to display `FSNode`s
 /// It is a variation of `druid::widget::Either` that displays a Label or a TextBox
 /// according to `editing`.
 pub struct FSNodeWidget {
-    edit_widget_id: WidgetId,
-    edit_branch: WidgetPod<FSNode, Flex<FSNode>>,
     normal_branch: WidgetPod<FSNode, Flex<FSNode>>,
-    editing: bool,
 }
 
 impl FSNodeWidget {
     #[allow(clippy::new_without_default)]
     pub fn new() -> FSNodeWidget {
-        let edit_widget = TextBox::new()
-            .with_placeholder("new item")
-            .with_id(WidgetId::next());
         FSNodeWidget {
-            edit_widget_id: edit_widget.id().unwrap(),
-            edit_branch: WidgetPod::new(
-                Flex::row()
-                    .with_child(edit_widget.lens(druid::lens::Map::new(
-                        |data: &FSNode| String::from(data.name.as_ref()),
-                        |data: &mut FSNode, name| data.name = ArcStr::from(name),
-                    )))
-                    .with_child(
-                        Button::new("Save").on_click(|_ctx, data: &mut FSNode, _env| {
-                            data.editing = false;
-                        }),
-                    ),
-            ),
             normal_branch: WidgetPod::new(Flex::row().with_default_spacer().with_child(
                 Label::dynamic(|data: &FSNode, _env| String::from(data.name.as_ref())),
             )),
-            editing: false,
         }
     }
 }
@@ -458,20 +362,11 @@ impl Widget<FSNode> for FSNodeWidget {
                 None
             }
             Event::MouseDown(ref mouse) if mouse.button.is_right() => {
-                if !self.editing {
-                    if data.is_branch() {
-                        ctx.show_context_menu(make_dir_context_menu(ctx.widget_id()), mouse.pos);
-                    } else {
-                        ctx.show_context_menu(make_file_context_menu(ctx.widget_id()), mouse.pos);
-                    }
-                    None
+                if data.is_branch() {
+                    ctx.show_context_menu(make_dir_context_menu(ctx.widget_id()), mouse.pos);
                 } else {
-                    Some(event)
+                    ctx.show_context_menu(make_file_context_menu(ctx.widget_id()), mouse.pos);
                 }
-            }
-            // Tell that the edition of a node name name (on creation/rename) is now completed
-            Event::Command(cmd) if cmd.is(EDIT_FINISHED) => {
-                ctx.submit_command(UPDATE_FILE.to(ctx.widget_id()));
                 None
             }
             Event::Command(cmd) if cmd.is(UPDATE_FILE) => {
@@ -479,38 +374,6 @@ impl Widget<FSNode> for FSNodeWidget {
                 None
             }
             Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => {
-                if self.editing {
-                    ctx.set_focus(self.edit_widget_id);
-                }
-                None
-            }
-            Event::Command(cmd) if cmd.is(NEW_FILE) => {
-                // data.ref_add_child({
-                // let mut child = FSNode::new(String::new(), "empty description".to_string());
-                // child.editing = true;
-                // child
-                // });
-                eprintln!("Adding childs is temporarily impossible");
-                ctx.submit_notification(TREE_OPEN);
-                None
-            }
-            Event::Command(cmd) if cmd.is(NEW_DIR) => {
-                // data.ref_add_child({
-                // let mut child = FSNode::new_dir(String::new());
-                // child.editing = true;
-                // child
-                // });
-                eprintln!("Adding childs is temporarily impossible");
-                ctx.submit_notification(TREE_OPEN);
-                None
-            }
-            Event::Command(cmd) if cmd.is(DELETE) => {
-                ctx.submit_notification(TREE_NODE_REMOVE);
-                None
-            }
-            Event::Command(cmd) if cmd.is(RENAME) => {
-                data.editing = true;
-                ctx.set_focus(self.edit_widget_id);
                 None
             }
             Event::Command(cmd) if cmd.is(CHROOT) => {
@@ -530,41 +393,16 @@ impl Widget<FSNode> for FSNodeWidget {
             _ => Some(event),
         };
         if let Some(evt) = new_event {
-            if evt.should_propagate_to_hidden() {
-                self.edit_branch.event(ctx, evt, data, env);
-                self.normal_branch.event(ctx, evt, data, env);
-            } else {
-                self.current_widget().event(ctx, evt, data, env)
-            }
+            self.normal_branch.event(ctx, evt, data, env);
         }
     }
 
     fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &FSNode, env: &Env) {
-        if let LifeCycle::WidgetAdded = event {
-            self.editing = data.editing;
-        }
-
-        if event.should_propagate_to_hidden() {
-            self.edit_branch.lifecycle(ctx, event, data, env);
-            self.normal_branch.lifecycle(ctx, event, data, env);
-        } else {
-            self.current_widget().lifecycle(ctx, event, data, env)
-        }
+        self.normal_branch.lifecycle(ctx, event, data, env);
     }
 
     fn update(&mut self, ctx: &mut UpdateCtx, _old_data: &FSNode, data: &FSNode, env: &Env) {
-        if data.editing != self.editing {
-            if self.editing {
-                // Tell that the edition of a node name name (on creation/rename) is now completed
-                ctx.submit_command(EDIT_FINISHED.to(ctx.widget_id()));
-            } else {
-                ctx.submit_command(EDIT_STARTED);
-            }
-            self.editing = data.editing;
-        } else if !self.editing & (_old_data.name != data.name) {
-            ctx.submit_command(UPDATE_FILE.to(ctx.widget_id()));
-        }
-        self.current_widget().update(ctx, data, env)
+        self.normal_branch.update(ctx, data, env)
     }
 
     fn layout(
@@ -574,25 +412,14 @@ impl Widget<FSNode> for FSNodeWidget {
         data: &FSNode,
         env: &Env,
     ) -> Size {
-        let current_widget = self.current_widget();
-        let size = current_widget.layout(ctx, bc, data, env);
-        current_widget.set_origin(ctx, data, env, Point::ORIGIN);
-        ctx.set_paint_insets(current_widget.paint_insets());
+        let size = self.normal_branch.layout(ctx, bc, data, env);
+        self.normal_branch.set_origin(ctx, data, env, Point::ORIGIN);
+        ctx.set_paint_insets(self.normal_branch.paint_insets());
         size
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &FSNode, env: &Env) {
-        self.current_widget().paint(ctx, data, env)
-    }
-}
-
-impl FSNodeWidget {
-    fn current_widget(&mut self) -> &mut WidgetPod<FSNode, Flex<FSNode>> {
-        if self.editing {
-            &mut self.edit_branch
-        } else {
-            &mut self.normal_branch
-        }
+        self.normal_branch.paint(ctx, data, env)
     }
 }
 
