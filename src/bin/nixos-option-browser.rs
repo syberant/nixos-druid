@@ -222,30 +222,36 @@ struct FSOpener {
 }
 
 impl FSOpener {
+    // TODO: Nice icons
     fn label(&self, data: &FSNode) -> String {
         use NodeType::*;
 
-        // TODO: Nice icons
-        match data.node_type {
-            Option(_) => match data.name.as_ref() {
-                "enable" => "V",
-                _ => "⚙️",
-            },
-            DocumentedSet(_) => "D",
-            Set => match self.chroot_status {
-                ChrootStatus::NO | ChrootStatus::ROOT => {
-                    // this is either the actual root or not the virtual root. We
-                    // show a directory emoji based on the expand state
+        if self.chroot_status == ChrootStatus::YES {
+            // for the chroot we show that the user can move the virtual root up a dir
+            "↖️"
+        } else {
+            match data.node_type {
+                Option(_) => match data.name.as_ref() {
+                    "enable" => "✅",
+                    _ => "⚙️",
+                },
+                DocumentedSet(_) => {
+                    if data.expanded {
+                        "📖"
+                    } else {
+                        "📕"
+                    }
+                }
+                Set => {
                     if data.expanded {
                         "📂"
                     } else {
                         "📁"
                     }
                 }
-                // for the chroot we show that the user can move the virtual root up a dir
-                ChrootStatus::YES => "↖️",
             }
-        }.to_owned()
+        }
+        .to_owned()
     }
 }
 
