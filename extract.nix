@@ -4,9 +4,12 @@
 # Idea: Generate JSON schema for a webapp?
 # https://github.com/json-editor/json-editor
 
+with builtins;
+
 let
-  inherit (import <nixpkgs> { }) pkgs lib;
-  inherit (import <nixpkgs/nixos> { configuration = { }; }) options;
+  inherit (import <nixpkgs> { }) lib;
+  options = (import <nixpkgs/nixos> { configuration = { }; }).options;
+  inherit (import ./utilities.nix { inherit lib; }) catchJson;
 in with lib;
 
 let
@@ -63,7 +66,8 @@ let
     if isOption opt then {
       _option = true;
       description = opt.description or "";
-      # example = opt.example or "";
+      example = opt.example or null;
+      default = opt.defaultText or (catchJson (opt.default or null));
       type = fixTypes antiInfiniteRecursion opt.type;
     } else
       recurseAttrs antiInfiniteRecursion opt;

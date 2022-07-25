@@ -7,6 +7,98 @@ use std::fs::File;
 use std::io::BufReader;
 
 #[derive(Deserialize, Debug, Clone)]
+pub struct NixGuardedOptionType {
+    _type: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct NixDerivation {
+    _derivation: bool,
+    pub name: String,
+    // pub meta: Value,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct NixFunction {
+    _function: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct NixTryEvalError {
+    _error: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct NixLiteralExpression {
+    // Needs to be "literalExpression"
+    _type: String,
+    pub text: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(untagged)]
+pub enum NixGuardedValue {
+    LiteralExpression(NixLiteralExpression),
+    Function(NixFunction),
+    Error(NixTryEvalError),
+    Derivation(NixDerivation),
+    OptionType(NixGuardedOptionType),
+
+    // Recursive variants
+    Attrs(HashMap<String, Box<NixGuardedValue>>),
+    List(Vec<Box<NixGuardedValue>>),
+
+    // Basic
+    String(String),
+    Number(i64),
+    Float(f64),
+    Bool(bool),
+    Null(()),
+
+    // Maybe turn all of the basic and recursive variants into an "other"
+    // value and keep them as a serialized JSON string?
+    // Need to handle nested derivations, etc. though
+}
+
+impl std::fmt::Display for NixGuardedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use NixGuardedValue::*;
+
+        match self {
+            OptionType(_) => write!(f, "<option type>"),
+            Function(_) => write!(f, "<function>"),
+            Derivation(d) => write!(f, "<build of {}>", d.name),
+            Error(_) => write!(f, "<error>"),
+            LiteralExpression(e) => write!(f, "```{}```", e.text),
+
+            String(s) => write!(f, "\"{}\"", s),
+            Number(n) => write!(f, "{}", n),
+            Float(n) => write!(f, "{}", n),
+            Bool(b) => write!(f, "{}", b),
+            Null(_) => write!(f, "null"),
+
+
+            Attrs(children) => {
+                write!(f, "{{")?;
+                for (k,v) in children {
+                    write!(f, "{}: {},\n", k, *v)?;
+                }
+                write!(f, "}}")
+            },
+            List(children) => {
+                write!(f, "[")?;
+                for v in children {
+                    write!(f, "{}, ", *v)?;
+                }
+                write!(f, "]")
+            },
+
+            // other => write!(f, "{:#?}", other),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug, Clone)]
 pub struct NixSubmodule {
     _submodule: bool,
     pub options: NixSet,
@@ -71,6 +163,8 @@ pub struct NixOption {
     _option: bool,
     pub description: String,
     pub r#type: NixTypeValue,
+    pub default: Option<NixGuardedValue>,
+    pub example: Option<NixGuardedValue>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

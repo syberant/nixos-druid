@@ -59,6 +59,8 @@ enum NodeType {
 struct LeafOption {
     description: String,
     type_name: String,
+    default: Option<String>,
+    example: Option<String>,
 }
 
 impl From<NixOption> for LeafOption {
@@ -66,17 +68,29 @@ impl From<NixOption> for LeafOption {
         Self {
             description: opt.description,
             type_name: opt.r#type.to_string(),
+            default: opt.default.map(|s| s.to_string()),
+            example: opt.example.map(|s| s.to_string()),
         }
     }
 }
 
 impl std::fmt::Display for LeafOption {
+    // TODO: Clean this mess
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "Description: {}\n\nType: {}",
             self.description, self.type_name
-        )
+        )?;
+
+        if let Some(ref def) = self.default {
+            write!(f, "\n\nDefault: {}", def)?;
+        }
+        if let Some(ref ex) = self.example {
+            write!(f, "\n\nExample: {}", ex)?;
+        }
+
+        write!(f, "")
     }
 }
 
@@ -107,7 +121,10 @@ impl FSNode {
     }
 
     fn new_dir(name: String, children: &NixSet) -> Self {
-        let children = children.into_iter().map(|(k,v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string()))).collect();
+        let children = children
+            .into_iter()
+            .map(|(k, v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string())))
+            .collect();
 
         let mut node = FSNode {
             name: ArcStr::from(name),
@@ -121,7 +138,10 @@ impl FSNode {
     }
 
     fn new_documented(name: String, option: LeafOption, children: &NixSet) -> Self {
-        let children = children.into_iter().map(|(k,v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string()))).collect();
+        let children = children
+            .into_iter()
+            .map(|(k, v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string())))
+            .collect();
 
         let mut node = FSNode {
             name: ArcStr::from(name),
@@ -141,14 +161,13 @@ impl FSNode {
         use Ordering::*;
 
         self.children
-            .sort_by(|a, b|
-                match (&a.node_type, &b.node_type) {
-                    (NodeType::Option(_), NodeType::Set) => Greater,
-                    (NodeType::Option(_), NodeType::DocumentedSet(_)) => Greater,
-                    (NodeType::Set, NodeType::Option(_)) => Less,
-                    (NodeType::DocumentedSet(_), NodeType::Option(_)) => Less,
+            .sort_by(|a, b| match (&a.node_type, &b.node_type) {
+                (NodeType::Option(_), NodeType::Set) => Greater,
+                (NodeType::Option(_), NodeType::DocumentedSet(_)) => Greater,
+                (NodeType::Set, NodeType::Option(_)) => Less,
+                (NodeType::DocumentedSet(_), NodeType::Option(_)) => Less,
 
-                    _ => match (a.name.as_ref(), b.name.as_ref()) {
+                _ => match (a.name.as_ref(), b.name.as_ref()) {
                     (_, "") => Less,
                     ("", _) => Greater,
                     ("enable", _) => Less,
@@ -325,12 +344,11 @@ impl Widget<FSNode> for FSOpener {
 }
 
 fn make_dir_context_menu(widget_id: WidgetId) -> Menu<FSNode> {
-    Menu::empty()
-        .entry(MenuItem::new(LocalizedString::new("Chroot")).on_activate(
-            move |ctx, _data: &mut FSNode, _env| {
-                ctx.submit_command(CHROOT.to(Target::Widget(widget_id)));
-            },
-        ))
+    Menu::empty().entry(MenuItem::new(LocalizedString::new("Chroot")).on_activate(
+        move |ctx, _data: &mut FSNode, _env| {
+            ctx.submit_command(CHROOT.to(Target::Widget(widget_id)));
+        },
+    ))
 }
 
 fn make_file_context_menu(_widget_id: WidgetId) -> Menu<FSNode> {
@@ -379,9 +397,7 @@ impl Widget<FSNode> for FSNodeWidget {
                 ctx.submit_notification(TREE_NOTIFY_PARENT.with(UPDATE_DIR_VIEW));
                 None
             }
-            Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => {
-                None
-            }
+            Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => None,
             Event::Command(cmd) if cmd.is(CHROOT) => {
                 ctx.submit_notification(TREE_CHROOT);
                 None
