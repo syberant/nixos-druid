@@ -566,7 +566,7 @@ pub fn main() {
         .window_size((600.0, 600.0))
         .title(LocalizedString::new("tree-demo-window-title").with_placeholder("Tree Demo"));
 
-    let root = nix_druid::parse::get_root();
+    let root = nix_druid::run::get_options();
     let root_name = "NixOS Configuration".to_string();
     let option_tree = create_node(&root, root_name);
 
