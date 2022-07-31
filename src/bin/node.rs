@@ -28,37 +28,35 @@ pub struct OptionNode {
     pub name: String,
     pub documentation: Option<OptionDocumentation>,
     pub option_type: Option<OptionType>,
+    // TODO: figure out a way to deal with this,
+    // other characteristics should be enough to make
+    // `Data` trait still work though
+    #[data(ignore)]
     pub value: Option<NixGuardedValue>,
     pub children: im::Vector<OptionNode>,
     pub expanded: bool,
 }
 
 impl OptionNode {
-    fn new_option(mut name: String, option_type: OptionType, doc: OptionDocumentation) -> Self {
+    fn new_option(
+        mut name: String,
+        option_type: OptionType,
+        doc: OptionDocumentation,
+    ) -> Self {
         use im::Vector;
         use OptionType::*;
 
         // I want to stay on stable rust,
         // with unstable one could use `box_patterns` here
         let children = match option_type {
-            AttrsOf(ref t) => {
+            NullOr(ref t) => {
                 if let Submodule(ref sub) = **t {
-                    name.push_str(".<name>");
-
                     sub.to_owned()
                 } else {
                     Vector::new()
                 }
             }
-            ListOf(ref t) => {
-                if let Submodule(ref sub) = **t {
-                    name.push_str(".*");
-
-                    sub.to_owned()
-                } else {
-                    Vector::new()
-                }
-            }
+            Submodule(ref sub) => sub.to_owned(),
             _ => Vector::new(),
         };
 
@@ -101,10 +99,101 @@ impl OptionNode {
         }
     }
 
-    pub fn get_documentation(&self) -> Option<String> {
-        self.option_type
-            .as_ref()
-            .map(|_| "Documentation not yet handled".to_string())
+    fn new_from_submodule(
+        name: String,
+        sub: im::Vector<OptionNode>,
+        cfg: Option<NixGuardedValue>,
+    ) -> Self {
+        // TODO: Add documentation + value?
+        let mut node = Self::new_set(name, sub);
+        node.add_config(cfg);
+        node
+    }
+
+    pub fn add_config(&mut self, mut cfg: Option<NixGuardedValue>) {
+        use self::OptionType::*;
+        use NixGuardedValue::*;
+
+        if let Some(ref t) = self.option_type {
+            match t {
+                AttrsOf(ref nt) => {
+                    if let Submodule(ref sub) = **nt {
+                        if let Some(Attrs(hashmap)) = cfg {
+                            self.children = hashmap
+                                .into_iter()
+                                .map(|(name, child_cfg)| {
+                                    OptionNode::new_from_submodule(
+                                        name,
+                                        sub.to_owned(),
+                                        Some(*child_cfg),
+                                    )
+                                })
+                                .collect();
+                            self.children
+                                .sort_by(|left, right| left.name.cmp(&right.name));
+                        }
+                    } else {
+                        self.value = cfg;
+                    }
+                }
+                ListOf(ref nt) => {
+                    if let Submodule(ref sub) = **nt {
+                        if let Some(List(list)) = cfg {
+                            self.children = list
+                                .into_iter()
+                                .enumerate()
+                                .map(|(counter, child_cfg)| {
+                                    OptionNode::new_from_submodule(
+                                        format!("Element {}", counter),
+                                        sub.to_owned(),
+                                        Some(*child_cfg),
+                                    )
+                                })
+                                .collect();
+                            self.children
+                                .sort_by(|left, right| left.name.cmp(&right.name));
+                        }
+                    } else {
+                        self.value = cfg;
+                    }
+                }
+                Submodule(ref sub) => {
+                    // A submodule is also kind of a set
+                    for ref mut c in self.children.iter_mut() {
+                        let child_cfg = cfg
+                            .as_mut()
+                            .map(|val| {
+                                if let NixGuardedValue::Attrs(ref mut attrs) = val {
+                                    attrs.remove(&c.name)
+                                } else {
+                                    None
+                                }
+                            })
+                            .flatten()
+                            .map(|val| *val);
+                        c.add_config(child_cfg);
+                    }
+                }
+
+                _ => self.value = cfg,
+            }
+        } else {
+            // This is a set
+            for ref mut c in self.children.iter_mut() {
+                let child_cfg = cfg
+                    .as_mut()
+                    .map(|val| {
+                        if let NixGuardedValue::Attrs(ref mut attrs) = val {
+                            attrs.remove(&c.name)
+                        } else {
+                            None
+                        }
+                    })
+                    .flatten()
+                    .map(|val| *val);
+                c.add_config(child_cfg);
+            }
+        }
     }
 }
 
@@ -205,11 +294,12 @@ impl From<NixTypeValue> for OptionType {
                 }
             }
             NixTypeValue::Submodule(set) => {
-                let children = set
+                let mut children: im::Vector<OptionNode> = set
                     .options
                     .into_iter()
                     .map(|(k, v)| OptionNode::new(k, *v))
                     .collect();
+                children.sort_by(|left, right| left.name.cmp(&right.name));
                 OptionType::Submodule(children)
             }
             InfiniteRecursion(r) => Unknown(InfiniteRecursion(r).to_string()),

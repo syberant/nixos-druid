@@ -36,7 +36,7 @@ pub fn get_options() -> super::parse::NixValue {
     unimplemented!()
 }
 
-pub fn get_config() -> serde_json::Value {
+pub fn get_config() -> super::parse::NixGuardedValue {
     let file = Path::new("extractConfig.nix");
     let command = run_nix_file(&file);
 

@@ -22,7 +22,7 @@ use node::{OptionDocumentation, OptionNode, OptionType};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use nix_druid::parse::{NixOption, NixSet, NixTypeValue, NixValue};
+use nix_druid::parse::{NixGuardedValue, NixOption, NixSet, NixTypeValue, NixValue};
 
 use druid::im::Vector;
 use druid::kurbo::Size;
@@ -40,7 +40,7 @@ use druid_widget_nursery::tree::{
 use druid_widget_nursery::selectors;
 
 /// Open this option in the option editor
-const FOCUS_OPTION: Selector<OptionDocumentation> = Selector::new("main.focus-option");
+const FOCUS_OPTION: Selector<DisplayData> = Selector::new("main.focus-option");
 
 selectors! {
     /// Command sent by the context menu to chroot to the targeted directory
@@ -83,14 +83,13 @@ impl Widget<OptionNode> for OptionNodeWidget {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, env: &Env) {
         let new_event = match event {
             Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                if let Some(ref doc) = data.documentation {
-                    ctx.submit_notification(FOCUS_OPTION.with(doc.clone()));
+                ctx.submit_notification(FOCUS_OPTION.with(DisplayData {
+                    documentation: data.documentation.clone(),
+                    value: data.value.clone(),
+                }));
 
-                    // Event handled, don't propagate
-                    None
-                } else {
-                    Some(event)
-                }
+                // Event handled, don't propagate
+                None
             }
             Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => None,
             Event::Command(cmd) if cmd.is(CHROOT) => {
@@ -144,16 +143,43 @@ impl Widget<OptionNode> for OptionNodeWidget {
 }
 
 #[derive(Clone, Data, Lens)]
+struct DisplayData {
+    documentation: Option<OptionDocumentation>,
+    // FIXME: Very hacky, maybe implement PartialEq?
+    #[data(ignore)]
+    value: Option<NixGuardedValue>,
+}
+
+impl std::fmt::Display for DisplayData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.documentation.as_ref(), self.value.as_ref()) {
+            (None, _) => write!(f, "No documentation available."),
+            (Some(ref d), Some(ref v)) => write!(f, "Value: {}\n\n\n{}", v, d),
+            (Some(ref d), None) => d.fmt(f),
+        }
+    }
+}
+
+impl DisplayData {
+    fn new() -> Self {
+        Self {
+            documentation: None,
+            value: None,
+        }
+    }
+}
+
+#[derive(Clone, Data, Lens)]
 struct UiData {
     tree: OptionNode,
-    text: String,
+    display: DisplayData,
 }
 
 impl UiData {
     fn new(tree: OptionNode) -> Self {
         Self {
             tree,
-            text: String::new(),
+            display: DisplayData::new(),
         }
     }
 }
@@ -173,7 +199,7 @@ impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
         let event = match event {
             Event::Notification(notif) if notif.is(FOCUS_OPTION) => {
                 if let Some(doc) = notif.get(FOCUS_OPTION) {
-                    data.text = doc.to_string();
+                    data.display = doc.clone();
                 }
 
                 // Stop propagating to ancestors
@@ -218,7 +244,7 @@ fn ui_builder() -> impl Widget<UiData> {
     .lens(UiData::tree);
 
     let wrapped_tree = Scroll::new(tree);
-    let label = Label::dynamic(|data: &String, _| data.to_string()).lens(UiData::text);
+    let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(UiData::display);
 
     NotificationHandlingWidget::new(
         Split::columns(wrapped_tree, label)
@@ -234,10 +260,12 @@ pub fn main() {
         .title(LocalizedString::new("tree-demo-window-title").with_placeholder("Tree Demo"));
 
     let option_root = nix_druid::run::get_options();
+    eprintln!("Parsing options is done.");
     let config_root = nix_druid::run::get_config();
-    eprintln!("Parsing is done.");
+    eprintln!("Parsing config is done.");
     let root_name = "NixOS Configuration".to_string();
-    let option_tree = OptionNode::new(root_name, option_root);
+    let mut option_tree = OptionNode::new(root_name, option_root);
+    option_tree.add_config(Some(config_root));
 
     let data = UiData::new(option_tree);
     eprintln!("GUI `Data` is built.");
