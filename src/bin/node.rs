@@ -5,21 +5,40 @@ use nix_druid::parse::{NixGuardedValue, NixTypeValue, NixValue};
 #[derive(Clone, Data, Debug, Lens)]
 pub struct OptionDocumentation {
     pub description: String,
-    // pub default: Option<NixGuardedValue>,
-    // pub example: Option<NixGuardedValue>,
+    pub type_name: String,
+    #[data(ignore)]
+    pub default: Option<NixGuardedValue>,
+    #[data(ignore)]
+    pub example: Option<NixGuardedValue>,
 }
 
 impl From<&nix_druid::parse::NixOption> for OptionDocumentation {
     fn from(opt: &nix_druid::parse::NixOption) -> Self {
         Self {
             description: opt.description.clone(),
+            type_name: opt.r#type.to_string(),
+            default: opt.default.clone(),
+            example: opt.example.clone(),
         }
     }
 }
 
 impl std::fmt::Display for OptionDocumentation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Description: {}", self.description)
+        write!(
+            f,
+            "Description: {}\n\nType: {}",
+            self.description, self.type_name
+        )?;
+
+        if let Some(ref def) = self.default {
+            write!(f, "\n\nDefault: {}", def)?;
+        }
+        if let Some(ref ex) = self.example {
+            write!(f, "\n\nExample: {}", ex)?;
+        }
+
+        write!(f, "")
     }
 }
 
