@@ -51,19 +51,29 @@ selectors! {
     UPDATE_FILE,
 }
 
+// AttrsOf(Submodule(_)), ListOf(Submodule(_)) get an extra child for showing documentation
 impl TreeNode for OptionNode {
     fn get_child(&self, index: usize) -> &Self {
-        // Don't handle submodules for now
-        &self.children[index]
+        match (self.extra_child.as_ref(), index) {
+            (Some(ref c), 0) => &c,
+            (Some(_), i) => &self.children[i - 1],
+            (None, i) => &self.children[i],
+        }
     }
+
     fn for_child_mut(&mut self, index: usize, mut cb: impl FnMut(&mut Self, usize)) {
-        // Don't handle submodules for now
-        cb(&mut self.children[index], index);
+        match (self.extra_child.as_mut(), index) {
+            (Some(ref mut c), 0) => cb(&mut *c, 0),
+            (Some(_), i) => cb(&mut self.children[i - 1], i),
+            (None, i) => cb(&mut self.children[i], i),
+        }
     }
 
     fn children_count(&self) -> usize {
-        // Don't handle submodules for now
-        self.children.len()
+        match self.extra_child {
+            Some(_) => self.children.len() + 1,
+            None => self.children.len(),
+        }
     }
 }
 

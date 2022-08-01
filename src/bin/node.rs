@@ -53,12 +53,17 @@ pub struct OptionNode {
     #[data(ignore)]
     pub value: Option<NixGuardedValue>,
     pub children: im::Vector<OptionNode>,
+    /// An extra child for options where children are of type `Submodule`.
+    /// This extra child gives a way to view documentation when there are no
+    /// real children.
+    #[data(ignore)]
+    pub extra_child: Option<Box<OptionNode>>,
     pub expanded: bool,
 }
 
 impl OptionNode {
     fn new_option(
-        mut name: String,
+        name: String,
         option_type: OptionType,
         doc: OptionDocumentation,
     ) -> Self {
@@ -79,12 +84,27 @@ impl OptionNode {
             _ => Vector::new(),
         };
 
+        let extra_child = match option_type {
+            AttrsOf(ref t) => {
+                if let Submodule(ref sub) = **t {
+                    Some(Box::new(OptionNode::new_set("<name>".to_string(), sub.to_owned())))
+                } else { None }
+            }
+            ListOf(ref t) => {
+                if let Submodule(ref sub) = **t {
+                    Some(Box::new(OptionNode::new_set("*".to_string(), sub.to_owned())))
+                } else { None }
+            }
+            _ => None,
+        };
+
         Self {
             name,
             documentation: Some(doc),
             option_type: Some(option_type),
             value: None,
             children,
+            extra_child,
             expanded: false,
         }
     }
@@ -98,6 +118,7 @@ impl OptionNode {
             option_type: None,
             value: None,
             children,
+            extra_child: None,
             expanded: false,
         }
     }
