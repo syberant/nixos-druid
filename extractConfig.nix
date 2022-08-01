@@ -3,9 +3,12 @@ with builtins;
 let
   # Load flake
   osConf = (getFlake "/etc/nixos").nixosConfigurations;
-  lib = osConf.nixos-desktop.pkgs.lib;
-  options = osConf.nixos-desktop.options;
-  config = lib.recursiveUpdate osConf.nixos-desktop.config {
+  computer = osConf.nixos-macbook;
+
+  # Get necessary components
+  lib = computer.pkgs.lib;
+  options = computer.options;
+  config = lib.recursiveUpdate computer.config {
     assertions = null;
     home-manager = null;
     nixpkgs.pkgs = null;
