@@ -533,10 +533,14 @@ fn ui_builder() -> impl Widget<UiData> {
     let wrapped_tree = Scroll::new(tree);
     let label = Label::dynamic(|data: &String, _| data.to_string()).lens(UiData::text);
 
-    NotificationHandlingWidget::new(Split::columns(wrapped_tree, label))
+    NotificationHandlingWidget::new(
+        Split::columns(wrapped_tree, label)
+            .split_point(0.3)
+            .min_size(300.0, 400.0),
+    )
 }
 
-fn create_node(value: &NixValue, name: String) -> FSNode {
+fn create_node(value: &NixValue, mut name: String) -> FSNode {
     match value {
         NixValue::Option(o) => {
             let head = LeafOption::from(o.clone());
@@ -544,6 +548,12 @@ fn create_node(value: &NixValue, name: String) -> FSNode {
             match o.r#type {
                 NixTypeValue::Type(ref t) => match t.description.as_str() {
                     "attribute set of submodules" | "list of submodules" | "null or submodule" => {
+                        match t.description.as_str() {
+                            "attribute set of submodules" => name.push_str(".<name>"),
+                            "list of submodules" => name.push_str(".*"),
+                            _ => {},
+                        }
+
                         FSNode::new_documented(
                             name,
                             head,
