@@ -98,18 +98,14 @@ impl std::fmt::Display for LeafOption {
 struct FSNode {
     /// Name of the node, that is diplayed in the tree
     name: ArcStr,
-    #[data(same_fn = "children_same")]
-    children: Vector<FSNode>,
+    /// Children FSNodes. We wrap them in an Arc to avoid a ugly side effect of Vector (discussed in examples/tree.rs)
+    children: Vector<Arc<FSNode>>,
     /// Explicit storage of the type (file or directory)
     node_type: NodeType,
     /// Keep track of the expanded state
     expanded: bool,
     /// Keep track of the chroot state (see TreeNode::get_chroot for description of the chroot mechanism)
     chroot_: Option<usize>,
-}
-/// Children FSNodes. We wrap them in an Arc to avoid a ugly side effect of Vector (discussed in examples/tree.rs)
-fn children_same(lhs: &Vector<FSNode>, rhs: &Vector<FSNode>) -> bool {
-    lhs.len() == rhs.len() && lhs.iter().zip(rhs.iter()).all(|(a, b)| a.same(b))
 }
 
 /// We use FSNode as a tree node, implementing the TreeNode trait.
@@ -127,7 +123,7 @@ impl FSNode {
     fn new_dir(name: String, children: &NixSet) -> Self {
         let children = children
             .into_iter()
-            .map(|(k, v): (&String, &Box<NixValue>)| create_node(v, k.to_string()))
+            .map(|(k, v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string())))
             .collect();
 
         let mut node = FSNode {
@@ -144,7 +140,7 @@ impl FSNode {
     fn new_documented(name: String, option: LeafOption, children: &NixSet) -> Self {
         let children = children
             .into_iter()
-            .map(|(k, v): (&String, &Box<NixValue>)| create_node(v, k.to_string()))
+            .map(|(k, v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string())))
             .collect();
 
         let mut node = FSNode {
