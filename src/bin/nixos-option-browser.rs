@@ -37,7 +37,7 @@ use druid_widget_nursery::tree::{
 use druid_widget_nursery::selectors;
 
 /// Open this option in the option editor
-const FOCUS_OPTION: Selector<NodeType> = Selector::new("main.focus-option");
+const FOCUS_OPTION: Selector<Arc<NodeType>> = Selector::new("main.focus-option");
 
 selectors! {
     /// Command sent by the context menu to chroot to the targeted directory
@@ -48,14 +48,14 @@ selectors! {
     UPDATE_FILE,
 }
 
-#[derive(Clone, Data, Debug)]
+#[derive(Clone, Debug)]
 enum NodeType {
     DocumentedSet(LeafOption),
     Set,
     Option(LeafOption),
 }
 
-#[derive(Clone, Data, Debug)]
+#[derive(Clone, Debug)]
 struct LeafOption {
     description: String,
     type_name: String,
@@ -101,7 +101,7 @@ struct FSNode {
     /// Children FSNodes. We wrap them in an Arc to avoid a ugly side effect of Vector (discussed in examples/tree.rs)
     children: Vector<Arc<FSNode>>,
     /// Explicit storage of the type (file or directory)
-    node_type: NodeType,
+    node_type: Arc<NodeType>,
     /// Keep track of the expanded state
     expanded: bool,
     /// Keep track of the chroot state (see TreeNode::get_chroot for description of the chroot mechanism)
@@ -114,7 +114,7 @@ impl FSNode {
         FSNode {
             name: ArcStr::from(name),
             children: Vector::new(),
-            node_type: NodeType::Option(option),
+            node_type: Arc::new(NodeType::Option(option)),
             expanded: false,
             chroot_: None,
         }
@@ -129,7 +129,7 @@ impl FSNode {
         let mut node = FSNode {
             name: ArcStr::from(name),
             children,
-            node_type: NodeType::Set,
+            node_type: Arc::new(NodeType::Set),
             expanded: false,
             chroot_: None,
         };
@@ -146,7 +146,7 @@ impl FSNode {
         let mut node = FSNode {
             name: ArcStr::from(name),
             children,
-            node_type: NodeType::DocumentedSet(option),
+            node_type: Arc::new(NodeType::DocumentedSet(option)),
             expanded: false,
             chroot_: None,
         };
@@ -161,7 +161,7 @@ impl FSNode {
         use Ordering::*;
 
         self.children
-            .sort_by(|a, b| match (&a.node_type, &b.node_type) {
+            .sort_by(|a, b| match (a.node_type.as_ref(), b.node_type.as_ref()) {
                 (NodeType::Option(_), NodeType::Set) => Greater,
                 (NodeType::Option(_), NodeType::DocumentedSet(_)) => Greater,
                 (NodeType::Set, NodeType::Option(_)) => Less,
@@ -205,7 +205,7 @@ impl TreeNode for FSNode {
     fn is_branch(&self) -> bool {
         use NodeType::*;
 
-        match &self.node_type {
+        match self.node_type.as_ref() {
             Set => true,
             DocumentedSet(_) => true,
             Option(_) => false,
@@ -243,7 +243,7 @@ impl FSOpener {
             // for the chroot we show that the user can move the virtual root up a dir
             "↖️"
         } else {
-            match data.node_type {
+            match data.node_type.as_ref() {
                 Option(_) => match data.name.as_ref() {
                     "enable" => "✅",
                     _ => "⚙️",
@@ -468,11 +468,12 @@ impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut UiData, env: &Env) {
         let event = match event {
             Event::Notification(notif) if notif.is(FOCUS_OPTION) => {
-                if let Some(NodeType::Option(opt)) = notif.get(FOCUS_OPTION) {
-                    data.text = opt.to_string();
-                }
-                if let Some(NodeType::DocumentedSet(opt)) = notif.get(FOCUS_OPTION) {
-                    data.text = opt.to_string();
+                if let Some(node) = notif.get(FOCUS_OPTION).as_ref() {
+                    match node.as_ref() {
+                        NodeType::Option(opt) => data.text = opt.to_string(),
+                        NodeType::DocumentedSet(opt) => data.text = opt.to_string(),
+                        _ => {}
+                    }
                 }
 
                 // Stop propagating to ancestors
