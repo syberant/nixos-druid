@@ -547,11 +547,11 @@ fn create_node(value: &NixValue, mut name: String) -> FSNode {
 
             match o.r#type {
                 NixTypeValue::Type(ref t) => match t.description.as_str() {
-                    "attribute set of submodules" | "list of submodules" | "null or submodule" => {
+                    "attribute set of submodule" | "list of submodule" | "null or submodule" => {
                         match t.description.as_str() {
-                            "attribute set of submodules" => name.push_str(".<name>"),
-                            "list of submodules" => name.push_str(".*"),
-                            _ => {},
+                            "attribute set of submodule" => name.push_str(".<name>"),
+                            "list of submodule" => name.push_str(".*"),
+                            _ => {}
                         }
 
                         FSNode::new_documented(
