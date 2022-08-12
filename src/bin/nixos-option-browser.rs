@@ -1,3 +1,6 @@
+mod node;
+use node::{OptionDocumentation, OptionNode};
+
 // Copyright 2022 The Druid Authors, Sybrand Aarnoutse.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -16,28 +19,24 @@
 // filesystem whatsoever). It's intended to use most of the features of
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
-use std::cmp::Ordering;
-use std::sync::Arc;
 
-use nix_druid::parse::{NixOption, NixSet, NixTypeValue, NixValue};
+use nix_druid::parse::NixGuardedValue;
 
-use druid::im::Vector;
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{
-    AppLauncher, ArcStr, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
-    LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Selector, Target, UpdateCtx,
-    Widget, WidgetExt, WidgetId, WidgetPod, WindowDesc,
+    AppLauncher, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
+    LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector, UpdateCtx,
+    Widget, WidgetExt, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{
-    ChrootStatus, Tree, TreeNode, TREE_ACTIVATE_NODE, TREE_CHILD_SHOW, TREE_CHROOT, TREE_CHROOT_UP,
-    TREE_NOTIFY_CHROOT, TREE_NOTIFY_PARENT,
+    Tree, TreeNode, TREE_ACTIVATE_NODE, TREE_CHILD_SHOW, TREE_CHROOT,
 };
 
 use druid_widget_nursery::selectors;
 
 /// Open this option in the option editor
-const FOCUS_OPTION: Selector<Arc<NodeType>> = Selector::new("main.focus-option");
+const FOCUS_OPTION: Selector<DisplayData> = Selector::new("main.focus-option");
 
 selectors! {
     /// Command sent by the context menu to chroot to the targeted directory
@@ -48,254 +47,158 @@ selectors! {
     UPDATE_FILE,
 }
 
-#[derive(Clone, Debug)]
-enum NodeType {
-    DocumentedSet(LeafOption),
-    Set,
-    Option(LeafOption),
-}
-
-#[derive(Clone, Debug)]
-struct LeafOption {
-    description: String,
-    type_name: String,
-    default: Option<String>,
-    example: Option<String>,
-}
-
-impl From<NixOption> for LeafOption {
-    fn from(opt: NixOption) -> Self {
-        Self {
-            description: opt.description,
-            type_name: opt.r#type.to_string(),
-            default: opt.default.map(|s| s.to_string()),
-            example: opt.example.map(|s| s.to_string()),
+// AttrsOf(Submodule(_)), ListOf(Submodule(_)) get an extra child for showing documentation
+impl TreeNode for OptionNode {
+    fn get_child(&self, index: usize) -> &Self {
+        if let Some(ref nested) = self.extra_child {
+            nested.get_child(index)
+        } else {
+            &self.children[index]
         }
-    }
-}
-
-impl std::fmt::Display for LeafOption {
-    // TODO: Clean this mess
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Description: {}\n\nType: {}",
-            self.description, self.type_name
-        )?;
-
-        if let Some(ref def) = self.default {
-            write!(f, "\n\nDefault: {}", def)?;
-        }
-        if let Some(ref ex) = self.example {
-            write!(f, "\n\nExample: {}", ex)?;
-        }
-
-        write!(f, "")
-    }
-}
-
-#[derive(Clone, Lens, Debug, Data)]
-struct FSNode {
-    /// Name of the node, that is diplayed in the tree
-    name: ArcStr,
-    /// Children FSNodes. We wrap them in an Arc to avoid a ugly side effect of Vector (discussed in examples/tree.rs)
-    children: Vector<Arc<FSNode>>,
-    /// Explicit storage of the type (file or directory)
-    node_type: Arc<NodeType>,
-    /// Keep track of the expanded state
-    expanded: bool,
-    /// Keep track of the chroot state (see TreeNode::get_chroot for description of the chroot mechanism)
-    chroot_: Option<usize>,
-}
-
-/// We use FSNode as a tree node, implementing the TreeNode trait.
-impl FSNode {
-    fn new(name: String, option: LeafOption) -> Self {
-        FSNode {
-            name: ArcStr::from(name),
-            children: Vector::new(),
-            node_type: Arc::new(NodeType::Option(option)),
-            expanded: false,
-            chroot_: None,
-        }
-    }
-
-    fn new_dir(name: String, children: &NixSet) -> Self {
-        let children = children
-            .into_iter()
-            .map(|(k, v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string())))
-            .collect();
-
-        let mut node = FSNode {
-            name: ArcStr::from(name),
-            children,
-            node_type: Arc::new(NodeType::Set),
-            expanded: false,
-            chroot_: None,
-        };
-        node.sort();
-        return node;
-    }
-
-    fn new_documented(name: String, option: LeafOption, children: &NixSet) -> Self {
-        let children = children
-            .into_iter()
-            .map(|(k, v): (&String, &Box<NixValue>)| Arc::new(create_node(v, k.to_string())))
-            .collect();
-
-        let mut node = FSNode {
-            name: ArcStr::from(name),
-            children,
-            node_type: Arc::new(NodeType::DocumentedSet(option)),
-            expanded: false,
-            chroot_: None,
-        };
-        node.sort();
-        return node;
-    }
-
-    /// The sorting is directories first and alphanumeric order.
-    /// This is called upon insertion or update of a child, by the
-    /// FSNodeWidget.
-    fn sort(&mut self) {
-        use Ordering::*;
-
-        self.children
-            .sort_by(|a, b| match (a.node_type.as_ref(), b.node_type.as_ref()) {
-                (NodeType::Option(_), NodeType::Set) => Greater,
-                (NodeType::Option(_), NodeType::DocumentedSet(_)) => Greater,
-                (NodeType::Set, NodeType::Option(_)) => Less,
-                (NodeType::DocumentedSet(_), NodeType::Option(_)) => Less,
-
-                _ => match (a.name.as_ref(), b.name.as_ref()) {
-                    (_, "") => Less,
-                    ("", _) => Greater,
-                    ("enable", _) => Less,
-                    (_, "enable") => Greater,
-                    _ => a.name.cmp(&b.name),
-                },
-            });
-    }
-}
-
-impl TreeNode for FSNode {
-    fn children_count(&self) -> usize {
-        self.children.len()
-    }
-
-    fn get_child(&self, index: usize) -> &FSNode {
-        &self.children[index]
     }
 
     fn for_child_mut(&mut self, index: usize, mut cb: impl FnMut(&mut Self, usize)) {
-        // Apply the closure to a clone of the child and update the `self.children` vector
-        // with the clone iff it's changed to avoid unnecessary calls to `update(...)`
-        // These calls currently come at a BIG performance penalty when opening a node with many children.
-
-        // TODO: there must be a more idiomatic way to do this
-        let orig = &self.children[index];
-        let mut new = orig.as_ref().clone();
-        cb(&mut new, index);
-        if !orig.as_ref().same(&new) {
-            self.children.remove(index);
-            self.children.insert(index, Arc::new(new));
-        }
-    }
-
-    fn is_branch(&self) -> bool {
-        use NodeType::*;
-
-        match self.node_type.as_ref() {
-            Set => true,
-            DocumentedSet(_) => true,
-            Option(_) => false,
-        }
-    }
-
-    fn rm_child(&mut self, index: usize) {
-        self.children.remove(index);
-    }
-
-    // those two accessors are the most simple implementation to enable chroot, and should
-    // be enough for most use cases.
-    fn chroot(&mut self, idx: Option<usize>) {
-        self.chroot_ = idx;
-    }
-
-    fn get_chroot(&self) -> Option<usize> {
-        self.chroot_
-    }
-}
-
-/// FSOpener is the opener widget, the small icon the user interacts with to
-/// expand directories.
-struct FSOpener {
-    label: WidgetPod<String, Label<String>>,
-    chroot_status: ChrootStatus,
-}
-
-impl FSOpener {
-    // TODO: Nice icons
-    fn label(&self, data: &FSNode) -> String {
-        use NodeType::*;
-
-        if self.chroot_status == ChrootStatus::YES {
-            // for the chroot we show that the user can move the virtual root up a dir
-            "↖️"
+        if let Some(ref mut nested) = self.extra_child {
+            nested.for_child_mut(index, cb)
         } else {
-            match data.node_type.as_ref() {
-                Option(_) => match data.name.as_ref() {
+            cb(&mut self.children[index], index);
+        }
+    }
+
+    fn children_count(&self) -> usize {
+        if let Some(ref nested) = self.extra_child {
+            nested.children_count()
+        } else {
+            self.children.len()
+        }
+    }
+}
+
+struct OptionNodeWidget(WidgetPod<OptionNode, Flex<OptionNode>>);
+
+impl OptionNodeWidget {
+    fn new() -> Self {
+        Self(WidgetPod::new(
+            Flex::row().with_default_spacer().with_child(Label::dynamic(
+                |data: &OptionNode, _env| {
+                    if let Some(ref t) = data.option_type {
+                        if let Some(ext) = t.get_name_extension() {
+                            return format!("{}.{}", data.name, ext);
+                        }
+                    }
+
+                    data.name.clone()
+                },
+            )),
+        ))
+    }
+}
+
+impl Widget<OptionNode> for OptionNodeWidget {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, env: &Env) {
+        let new_event = match event {
+            Event::MouseDown(ref mouse) if mouse.button.is_left() => {
+                ctx.submit_notification(FOCUS_OPTION.with(DisplayData {
+                    documentation: data.documentation.clone(),
+                    value: data.value.clone(),
+                }));
+
+                // Event handled, don't propagate
+                None
+            }
+            Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => None,
+            Event::Command(cmd) if cmd.is(CHROOT) => {
+                ctx.submit_notification(TREE_CHROOT);
+                None
+            }
+            _ => Some(event),
+        };
+
+        if let Some(evt) = new_event {
+            self.0.event(ctx, evt, data, env);
+        }
+    }
+
+    fn lifecycle(
+        &mut self,
+        ctx: &mut LifeCycleCtx,
+        event: &LifeCycle,
+        data: &OptionNode,
+        env: &Env,
+    ) {
+        self.0.lifecycle(ctx, event, data, env);
+    }
+
+    fn update(
+        &mut self,
+        ctx: &mut UpdateCtx,
+        _old_data: &OptionNode,
+        data: &OptionNode,
+        env: &Env,
+    ) {
+        self.0.update(ctx, data, env)
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        bc: &BoxConstraints,
+        data: &OptionNode,
+        env: &Env,
+    ) -> Size {
+        let size = self.0.layout(ctx, bc, data, env);
+        self.0.set_origin(ctx, data, env, Point::ORIGIN);
+        ctx.set_paint_insets(self.0.paint_insets());
+        size
+    }
+
+    fn paint(&mut self, ctx: &mut PaintCtx, data: &OptionNode, env: &Env) {
+        self.0.paint(ctx, data, env)
+    }
+}
+
+/// Opener is the opener widget, the small icon the user interacts with to
+/// expand directories.
+struct Opener {
+    label: WidgetPod<String, Label<String>>,
+}
+
+impl Opener {
+    // TODO: Nice icons
+    fn label(&self, data: &OptionNode) -> String {
+        if let Some(ref t) = data.option_type {
+            if t.has_nested_submodule() {
+                if data.expanded {
+                    "📖"
+                } else {
+                    "📕"
+                }
+            } else {
+                match data.name.as_ref() {
                     "enable" => "✅",
                     _ => "⚙️",
-                },
-                DocumentedSet(_) => {
-                    if data.expanded {
-                        "📖"
-                    } else {
-                        "📕"
-                    }
                 }
-                Set => {
-                    if data.expanded {
-                        "📂"
-                    } else {
-                        "📁"
-                    }
-                }
+            }
+        } else {
+            if data.expanded {
+                "📂"
+            } else {
+                "📁"
             }
         }
         .to_owned()
     }
 }
 
-impl Widget<FSNode> for FSOpener {
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut FSNode, _env: &Env) {
+impl Widget<OptionNode> for Opener {
+    fn event(&mut self, _ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, _env: &Env) {
         if data.is_branch() {
             match event {
                 // The wrapping tree::Opener widget transforms a click to this command.
                 Event::Command(cmd) if cmd.is(TREE_ACTIVATE_NODE) => {
                     // We care only for branches (we could of course imagine interactions with files too)
                     if data.is_branch() {
-                        match self.chroot_status {
-                            // not on chroot ? expand
-                            ChrootStatus::NO | ChrootStatus::ROOT => data.expanded = !data.expanded,
-                            // on chroot ? chroot up
-                            ChrootStatus::YES => ctx.submit_notification(TREE_CHROOT_UP),
-                        }
-                    }
-                }
-                // The Tree widget sends this command when the node's virtual root status change.
-                // This is because the data of a virtual root is not enough to tell. We keep the
-                // info on the widget at the moment.
-                Event::Command(cmd) if cmd.is(TREE_NOTIFY_CHROOT) => {
-                    let new_status = cmd.get(TREE_NOTIFY_CHROOT).unwrap().clone();
-                    if self.chroot_status != new_status {
-                        self.chroot_status = new_status;
-                        if let ChrootStatus::YES = self.chroot_status {
-                            data.expanded = true;
-                        }
-                        ctx.children_changed();
-                        ctx.request_update();
+                        data.expanded = !data.expanded;
                     }
                 }
                 _ => (),
@@ -303,12 +206,18 @@ impl Widget<FSNode> for FSOpener {
         }
     }
 
-    fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &FSNode, env: &Env) {
+    fn lifecycle(
+        &mut self,
+        ctx: &mut LifeCycleCtx,
+        event: &LifeCycle,
+        data: &OptionNode,
+        env: &Env,
+    ) {
         let label = self.label(data);
         self.label.lifecycle(ctx, event, &label, env);
     }
 
-    fn update(&mut self, ctx: &mut UpdateCtx, old_data: &FSNode, data: &FSNode, env: &Env) {
+    fn update(&mut self, ctx: &mut UpdateCtx, old_data: &OptionNode, data: &OptionNode, env: &Env) {
         if old_data.expanded != data.expanded {
             let label = self.label(data);
             self.label.update(ctx, &label, env);
@@ -322,7 +231,7 @@ impl Widget<FSNode> for FSOpener {
         &mut self,
         ctx: &mut LayoutCtx,
         bc: &BoxConstraints,
-        data: &FSNode,
+        data: &OptionNode,
         env: &Env,
     ) -> Size {
         let label = self.label(data);
@@ -331,125 +240,50 @@ impl Widget<FSNode> for FSOpener {
         size
     }
 
-    fn paint(&mut self, ctx: &mut PaintCtx, data: &FSNode, env: &Env) {
+    fn paint(&mut self, ctx: &mut PaintCtx, data: &OptionNode, env: &Env) {
         let label = self.label(data);
         self.label.paint(ctx, &label, env)
     }
 }
 
-fn make_dir_context_menu(widget_id: WidgetId) -> Menu<FSNode> {
-    Menu::empty().entry(MenuItem::new(LocalizedString::new("Chroot")).on_activate(
-        move |ctx, _data: &mut FSNode, _env| {
-            ctx.submit_command(CHROOT.to(Target::Widget(widget_id)));
-        },
-    ))
+#[derive(Clone, Data, Lens)]
+struct DisplayData {
+    documentation: Option<OptionDocumentation>,
+    // FIXME: Very hacky, maybe implement PartialEq?
+    #[data(ignore)]
+    value: Option<NixGuardedValue>,
 }
 
-fn make_file_context_menu(_widget_id: WidgetId) -> Menu<FSNode> {
-    Menu::empty()
-}
-
-/// THis is the user widget we pass to the Tree constructor, to display `FSNode`s
-/// It is a variation of `druid::widget::Either` that displays a Label or a TextBox
-/// according to `editing`.
-pub struct FSNodeWidget {
-    normal_branch: WidgetPod<FSNode, Flex<FSNode>>,
-}
-
-impl FSNodeWidget {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> FSNodeWidget {
-        FSNodeWidget {
-            normal_branch: WidgetPod::new(Flex::row().with_default_spacer().with_child(
-                Label::dynamic(|data: &FSNode, _env| String::from(data.name.as_ref())),
-            )),
+impl std::fmt::Display for DisplayData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.documentation.as_ref(), self.value.as_ref()) {
+            (None, _) => write!(f, "No documentation available."),
+            (Some(ref d), Some(ref v)) => write!(f, "Value: {}\n\n\n{}", v, d),
+            (Some(ref d), None) => d.fmt(f),
         }
     }
 }
 
-impl Widget<FSNode> for FSNodeWidget {
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut FSNode, env: &Env) {
-        // Well, a lot of stuff is going on here, but not directly related to the tree widget. It's
-        // mostly plubming for the FSNodeWidget interactions... The exercise is left to the reader.
-        // (i.e. I'm tired documenting, I'm not even sure how much this may change in a near future.)
-        let new_event = match event {
-            Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                ctx.submit_notification(FOCUS_OPTION.with(data.node_type.clone()));
-
-                // Event handled, don't propagate
-                None
-            }
-            Event::MouseDown(ref mouse) if mouse.button.is_right() => {
-                if data.is_branch() {
-                    ctx.show_context_menu(make_dir_context_menu(ctx.widget_id()), mouse.pos);
-                } else {
-                    ctx.show_context_menu(make_file_context_menu(ctx.widget_id()), mouse.pos);
-                }
-                None
-            }
-            Event::Command(cmd) if cmd.is(UPDATE_FILE) => {
-                ctx.submit_notification(TREE_NOTIFY_PARENT.with(UPDATE_DIR_VIEW));
-                None
-            }
-            Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => None,
-            Event::Command(cmd) if cmd.is(CHROOT) => {
-                ctx.submit_notification(TREE_CHROOT);
-                None
-            }
-            Event::Command(cmd) if cmd.is(TREE_NOTIFY_PARENT) => {
-                let cmd_data = cmd.get(TREE_NOTIFY_PARENT).unwrap();
-                if *cmd_data == UPDATE_DIR_VIEW {
-                    // data.update();
-                    ctx.set_handled();
-                    None
-                } else {
-                    Some(event)
-                }
-            }
-            _ => Some(event),
-        };
-        if let Some(evt) = new_event {
-            self.normal_branch.event(ctx, evt, data, env);
+impl DisplayData {
+    fn new() -> Self {
+        Self {
+            documentation: None,
+            value: None,
         }
-    }
-
-    fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &FSNode, env: &Env) {
-        self.normal_branch.lifecycle(ctx, event, data, env);
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx, _old_data: &FSNode, data: &FSNode, env: &Env) {
-        self.normal_branch.update(ctx, data, env)
-    }
-
-    fn layout(
-        &mut self,
-        ctx: &mut LayoutCtx,
-        bc: &BoxConstraints,
-        data: &FSNode,
-        env: &Env,
-    ) -> Size {
-        let size = self.normal_branch.layout(ctx, bc, data, env);
-        self.normal_branch.set_origin(ctx, data, env, Point::ORIGIN);
-        ctx.set_paint_insets(self.normal_branch.paint_insets());
-        size
-    }
-
-    fn paint(&mut self, ctx: &mut PaintCtx, data: &FSNode, env: &Env) {
-        self.normal_branch.paint(ctx, data, env)
     }
 }
 
 #[derive(Clone, Data, Lens)]
 struct UiData {
-    tree: FSNode,
-    text: String,
+    tree: OptionNode,
+    display: DisplayData,
 }
 
 impl UiData {
-    fn new(tree: FSNode) -> Self {
+    fn new(tree: OptionNode) -> Self {
         Self {
             tree,
-            text: String::new(),
+            display: DisplayData::new(),
         }
     }
 }
@@ -468,12 +302,8 @@ impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut UiData, env: &Env) {
         let event = match event {
             Event::Notification(notif) if notif.is(FOCUS_OPTION) => {
-                if let Some(node) = notif.get(FOCUS_OPTION).as_ref() {
-                    match node.as_ref() {
-                        NodeType::Option(opt) => data.text = opt.to_string(),
-                        NodeType::DocumentedSet(opt) => data.text = opt.to_string(),
-                        _ => {}
-                    }
+                if let Some(doc) = notif.get(FOCUS_OPTION) {
+                    data.display = doc.clone();
                 }
 
                 // Stop propagating to ancestors
@@ -511,22 +341,17 @@ impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
 
 fn ui_builder() -> impl Widget<UiData> {
     let tree = Tree::new(
-        || {
-            // Our items are editable. If editing is true, we show a TextBox of the name,
-            // otherwise it's a Label
-            FSNodeWidget::new()
-        },
+        || OptionNodeWidget::new(),
         // The boolean deciding whether the tree should expand or not, acquired via Lens
-        FSNode::expanded,
+        OptionNode::expanded,
     )
-    .with_opener(|| FSOpener {
+    .with_opener(|| Opener {
         label: WidgetPod::new(Label::dynamic(|st: &String, _| st.clone())),
-        chroot_status: ChrootStatus::NO,
     })
     .lens(UiData::tree);
 
     let wrapped_tree = Scroll::new(tree);
-    let label = Label::dynamic(|data: &String, _| data.to_string()).lens(UiData::text);
+    let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(UiData::display);
 
     NotificationHandlingWidget::new(
         Split::columns(wrapped_tree, label)
@@ -535,47 +360,19 @@ fn ui_builder() -> impl Widget<UiData> {
     )
 }
 
-fn create_node(value: &NixValue, mut name: String) -> FSNode {
-    match value {
-        NixValue::Option(o) => {
-            let head = LeafOption::from(o.clone());
-
-            match o.r#type {
-                NixTypeValue::Type(ref t) => match t.description.as_str() {
-                    "attribute set of submodule" | "list of submodule" | "null or submodule" => {
-                        match t.description.as_str() {
-                            "attribute set of submodule" => name.push_str(".<name>"),
-                            "list of submodule" => name.push_str(".*"),
-                            _ => {}
-                        }
-
-                        FSNode::new_documented(
-                            name,
-                            head,
-                            &t.nestedTypes["elemType"].get_submodule().unwrap().options,
-                        )
-                    }
-                    _ => FSNode::new(name, head),
-                },
-                NixTypeValue::Submodule(ref s) => FSNode::new_documented(name, head, &s.options),
-                _ => FSNode::new(name, head),
-            }
-        }
-        NixValue::Set(s) => FSNode::new_dir(name, s),
-    }
-}
-
 pub fn main() {
     // Create the main window
     let main_window = WindowDesc::new(ui_builder())
         .window_size((600.0, 600.0))
-        .title(LocalizedString::new("tree-demo-window-title").with_placeholder("Tree Demo"));
+        .title(LocalizedString::new("NixOS option browser").with_placeholder("nixos-druid"));
 
     let root = nix_druid::run::get_options();
+    eprintln!("Parsing options is done.");
     let root_name = "NixOS Configuration".to_string();
-    let option_tree = create_node(&root, root_name);
+    let tree = OptionNode::new(root_name, root);
 
-    let data = UiData::new(option_tree);
+    let data = UiData::new(tree);
+    eprintln!("GUI `Data` is built.");
 
     // start the application
     AppLauncher::with_window(main_window)
