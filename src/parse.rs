@@ -34,7 +34,7 @@ pub struct NixLiteralExpression {
     pub text: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Clone)]
 #[serde(untagged)]
 pub enum NixGuardedValue {
     LiteralExpression(NixLiteralExpression),
@@ -61,6 +61,13 @@ pub enum NixGuardedValue {
 
 impl std::fmt::Display for NixGuardedValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Simply use the pretty-print output of `Debug`
+        write!(f, "{}", format!("{self:#?}"))
+    }
+}
+
+impl std::fmt::Debug for NixGuardedValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use NixGuardedValue::*;
 
         match self {
@@ -78,18 +85,10 @@ impl std::fmt::Display for NixGuardedValue {
 
 
             Attrs(children) => {
-                write!(f, "{{")?;
-                for (k,v) in children {
-                    write!(f, "{}: {},\n", k, *v)?;
-                }
-                write!(f, "}}")
+                f.debug_map().entries(children.iter()).finish()
             },
             List(children) => {
-                write!(f, "[")?;
-                for v in children {
-                    write!(f, "{}, ", *v)?;
-                }
-                write!(f, "]")
+                f.debug_list().entries(children.iter()).finish()
             },
 
             // other => write!(f, "{:#?}", other),
