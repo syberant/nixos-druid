@@ -62,11 +62,7 @@ pub struct OptionNode {
 }
 
 impl OptionNode {
-    fn new_option(
-        name: String,
-        option_type: OptionType,
-        doc: OptionDocumentation,
-    ) -> Self {
+    fn new_option(name: String, option_type: OptionType, doc: OptionDocumentation) -> Self {
         use im::Vector;
         use OptionType::*;
 
@@ -87,13 +83,23 @@ impl OptionNode {
         let extra_child = match option_type {
             AttrsOf(ref t) => {
                 if let Submodule(ref sub) = **t {
-                    Some(Box::new(OptionNode::new_set("<name>".to_string(), sub.to_owned())))
-                } else { None }
+                    Some(Box::new(OptionNode::new_set(
+                        "<name>".to_string(),
+                        sub.to_owned(),
+                    )))
+                } else {
+                    None
+                }
             }
             ListOf(ref t) => {
                 if let Submodule(ref sub) = **t {
-                    Some(Box::new(OptionNode::new_set("*".to_string(), sub.to_owned())))
-                } else { None }
+                    Some(Box::new(OptionNode::new_set(
+                        "*".to_string(),
+                        sub.to_owned(),
+                    )))
+                } else {
+                    None
+                }
             }
             _ => None,
         };
@@ -197,7 +203,7 @@ impl OptionNode {
                         self.value = cfg;
                     }
                 }
-                Submodule(ref sub) => {
+                Submodule(_) => {
                     // A submodule is also kind of a set
                     for ref mut c in self.children.iter_mut() {
                         let child_cfg = cfg
@@ -258,6 +264,40 @@ pub enum OptionType {
     // Miscellaneous types
     Unknown(String),
     Submodule(im::Vector<OptionNode>),
+}
+
+impl OptionType {
+    pub fn has_nested_submodule(&self) -> bool {
+        use OptionType::*;
+
+        if let Submodule(_) = self {
+            true
+        } else {
+            self.get_name_extension().is_some()
+        }
+    }
+
+    pub fn get_name_extension(&self) -> Option<&str> {
+        use OptionType::*;
+
+        match self {
+            AttrsOf(ref t) => {
+                if let Submodule(_) = **t {
+                    Some("<name>")
+                } else {
+                    None
+                }
+            }
+            ListOf(ref t) => {
+                if let Submodule(_) = **t {
+                    Some("*")
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
 }
 
 impl Data for OptionType {
