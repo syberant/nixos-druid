@@ -20,7 +20,7 @@ use node::{OptionDocumentation, OptionNode};
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
 
-use nix_druid::parse::NixGuardedValue;
+use nixos_druid::parse::NixGuardedValue;
 
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
@@ -366,7 +366,7 @@ pub fn main() {
         .window_size((600.0, 600.0))
         .title(LocalizedString::new("NixOS option browser").with_placeholder("nixos-druid"));
 
-    let root = nix_druid::run::get_options();
+    let root = nixos_druid::run::get_options();
     eprintln!("Parsing options is done.");
     let root_name = "NixOS Configuration".to_string();
     let tree = OptionNode::new(root_name, root);

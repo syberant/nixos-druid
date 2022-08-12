@@ -1,6 +1,6 @@
 use druid::im;
 use druid::{Data, Lens};
-use nix_druid::parse::{NixGuardedValue, NixTypeValue, NixValue};
+use nixos_druid::parse::{NixGuardedValue, NixTypeValue, NixOption, NixValue};
 
 #[derive(Clone, Data, Debug, Lens)]
 pub struct OptionDocumentation {
@@ -12,8 +12,8 @@ pub struct OptionDocumentation {
     pub example: Option<NixGuardedValue>,
 }
 
-impl From<&nix_druid::parse::NixOption> for OptionDocumentation {
-    fn from(opt: &nix_druid::parse::NixOption) -> Self {
+impl From<&NixOption> for OptionDocumentation {
+    fn from(opt: &NixOption) -> Self {
         Self {
             description: opt.description.clone(),
             type_name: opt.r#type.to_string(),

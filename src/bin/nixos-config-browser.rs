@@ -22,7 +22,7 @@ use node::{OptionDocumentation, OptionNode, OptionType};
 use std::cmp::Ordering;
 use std::sync::Arc;
 
-use nix_druid::parse::{NixGuardedValue, NixOption, NixSet, NixTypeValue, NixValue};
+use nixos_druid::parse::{NixGuardedValue, NixOption, NixSet, NixTypeValue, NixValue};
 
 use druid::im::Vector;
 use druid::kurbo::Size;
@@ -269,9 +269,9 @@ pub fn main() {
         .window_size((600.0, 600.0))
         .title(LocalizedString::new("tree-demo-window-title").with_placeholder("Tree Demo"));
 
-    let option_root = nix_druid::run::get_options();
+    let option_root = nixos_druid::run::get_options();
     eprintln!("Parsing options is done.");
-    let config_root = nix_druid::run::get_config();
+    let config_root = nixos_druid::run::get_config();
     eprintln!("Parsing config is done.");
     let root_name = "NixOS Configuration".to_string();
     let mut option_tree = OptionNode::new(root_name, option_root);

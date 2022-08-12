@@ -770,7 +770,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nix-druid"
+name = "nixos-druid"
 version = "0.1.0"
 dependencies = [
  "druid",
