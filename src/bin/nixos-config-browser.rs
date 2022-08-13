@@ -25,9 +25,9 @@ use nixos_druid::parse::NixGuardedValue;
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{
-    AppLauncher, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
-    LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector, UpdateCtx,
-    Widget, WidgetExt, WidgetPod, WindowDesc,
+    AppDelegate, AppLauncher, BoxConstraints, Command, Data, DelegateCtx, Env, Event, EventCtx,
+    Handled, LayoutCtx, Lens, LifeCycle, LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector,
+    Target, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT};
 
@@ -87,7 +87,7 @@ impl Widget<OptionNode> for OptionNodeWidget {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, env: &Env) {
         let new_event = match event {
             Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                ctx.submit_notification(FOCUS_OPTION.with(DisplayData {
+                ctx.submit_command(FOCUS_OPTION.with(DisplayData {
                     documentation: data.documentation.clone(),
                     value: data.value.clone(),
                 }));
@@ -188,54 +188,23 @@ impl UiData {
     }
 }
 
-struct NotificationHandlingWidget<T> {
-    inner: T,
-}
+struct Delegate;
 
-impl<T> NotificationHandlingWidget<T> {
-    fn new(inner: T) -> Self {
-        Self { inner }
-    }
-}
-
-impl<T: Widget<UiData>> Widget<UiData> for NotificationHandlingWidget<T> {
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut UiData, env: &Env) {
-        let event = match event {
-            Event::Notification(notif) if notif.is(FOCUS_OPTION) => {
-                if let Some(doc) = notif.get(FOCUS_OPTION) {
-                    data.display = doc.clone();
-                }
-
-                // Stop propagating to ancestors
-                ctx.set_handled();
-                None
-            }
-            x => Some(x),
-        };
-
-        if let Some(ev) = event {
-            self.inner.event(ctx, ev, data, env);
-        }
-    }
-
-    // Just pass all these function calls directly to the inner widget
-    fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &UiData, env: &Env) {
-        self.inner.lifecycle(ctx, event, data, env);
-    }
-    fn update(&mut self, ctx: &mut UpdateCtx, old_data: &UiData, data: &UiData, env: &Env) {
-        self.inner.update(ctx, old_data, data, env);
-    }
-    fn layout(
+impl AppDelegate<UiData> for Delegate {
+    fn command(
         &mut self,
-        ctx: &mut LayoutCtx,
-        bc: &BoxConstraints,
-        data: &UiData,
-        env: &Env,
-    ) -> Size {
-        self.inner.layout(ctx, bc, data, env)
-    }
-    fn paint(&mut self, ctx: &mut PaintCtx, data: &UiData, env: &Env) {
-        self.inner.paint(ctx, data, env);
+        _ctx: &mut DelegateCtx,
+        _target: Target,
+        cmd: &Command,
+        data: &mut UiData,
+        _env: &Env,
+    ) -> Handled {
+        if let Some(doc) = cmd.get(FOCUS_OPTION) {
+            data.display = doc.clone();
+            Handled::Yes
+        } else {
+            Handled::No
+        }
     }
 }
 
@@ -250,18 +219,19 @@ fn ui_builder() -> impl Widget<UiData> {
     let wrapped_tree = Scroll::new(tree);
     let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(UiData::display);
 
-    NotificationHandlingWidget::new(
-        Split::columns(wrapped_tree, label)
-            .split_point(0.3)
-            .min_size(300.0, 400.0),
-    )
+    Split::columns(wrapped_tree, label)
+        .split_point(0.3)
+        .min_size(300.0, 400.0)
 }
 
 pub fn main() {
     // Create the main window
     let main_window = WindowDesc::new(ui_builder())
         .window_size((600.0, 600.0))
-        .title(LocalizedString::new("nixos-config-browser-window-title").with_placeholder("NixOS Config Browser"));
+        .title(
+            LocalizedString::new("nixos-config-browser-window-title")
+                .with_placeholder("NixOS Config Browser"),
+        );
 
     let option_root = nixos_druid::run::get_options();
     eprintln!("Parsing options is done.");
@@ -276,6 +246,7 @@ pub fn main() {
 
     // start the application
     AppLauncher::with_window(main_window)
+        .delegate(Delegate)
         // .log_to_console()
         .launch(data)
         .expect("launch failed");
