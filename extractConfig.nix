@@ -13,11 +13,14 @@ let
     home-manager = null;
     nixpkgs.pkgs = null;
     system.build.manual = null;
+    virtualisation = null;
+    boot = null;
 
-    # Trying to do all services runs up to my memory limit and gets `nix-instantiate` killed, turn it off for now
+    # Trying to do all services runs up to my memory limit (more than 12GB) and gets `nix-instantiate` killed, turn it off for now
     services = null;
     # services.etebase-server = null;
     # services.hercules-ci-agent = null;
+    # services.gitlab = null;
   };
 
   inherit (import ./utilities.nix { inherit lib; }) catchErrors;
