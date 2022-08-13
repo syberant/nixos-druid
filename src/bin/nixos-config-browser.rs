@@ -233,9 +233,9 @@ pub fn main() {
                 .with_placeholder("NixOS Config Browser"),
         );
 
-    let option_root = nixos_druid::run::get_options();
+    let option_root = nixos_druid::run::get_options().expect("Getting NixOS options failed");
     eprintln!("Parsing options is done.");
-    let config_root = nixos_druid::run::get_config();
+    let config_root = nixos_druid::run::get_config().expect("Getting NixOS config failed");
     eprintln!("Parsing config is done.");
     let root_name = "NixOS Configuration".to_string();
     let mut option_tree = OptionNode::new(root_name, option_root);

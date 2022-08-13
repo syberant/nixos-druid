@@ -1,9 +1,19 @@
+use serde::de::DeserializeOwned;
 use std::fs::File;
 use std::io::{BufReader, Error, Read};
 use std::path::Path;
 use std::process::{Command, Output};
 
-// TODO: Implement caching?
+#[derive(Debug)]
+pub enum LoadJsonError {
+    /// Errors where the command could not be properly called
+    FailedCommand(std::io::Error),
+    /// Errors where the resulting JSON output could not be parsed
+    ParseRelated(serde_json::Error),
+    /// Errors returned by `nix-instantiate` on a nonzero status code
+    FailedEval(String),
+}
+
 fn run_nix_file(file: &Path) -> Result<Output, Error> {
     Command::new("nix-instantiate")
         .args([
@@ -23,6 +33,39 @@ fn load_json_file(name: &Path) -> std::io::Result<String> {
     Ok(content)
 }
 
+fn load_from_cache_or_eval<V: DeserializeOwned>(
+    file: &Path,
+    cache_file: &Path,
+) -> Result<V, LoadJsonError> {
+    if let Ok(content) = load_json_file(cache_file) {
+        if let Ok(parsed) = serde_json::from_str(&content) {
+            return Ok(parsed);
+        } else {
+            eprintln!(
+                "Parsing json produced by cached `{}` failed, ignoring cache",
+                file.display()
+            );
+        }
+    }
+
+    let command = run_nix_file(file);
+
+    match command {
+        Ok(output) => {
+            if output.status.success() {
+                serde_json::from_slice(&output.stdout).map_err(|e| LoadJsonError::ParseRelated(e))
+            } else {
+                Err(LoadJsonError::FailedEval(format!(
+                    "Exited with status: {}\nError output: {}",
+                    output.status,
+                    String::from_utf8(output.stderr).expect("Command outputted invalid UTF-8 text")
+                )))
+            }
+        }
+        Err(e) => Err(LoadJsonError::FailedCommand(e)),
+    }
+}
+
 /// Returns a list with all the attribute names of <flake>.nixosConfigurations
 pub fn get_available_nixos_configurations() -> Vec<String> {
     let result = Command::new("nix-instantiate")
@@ -39,58 +82,16 @@ pub fn get_available_nixos_configurations() -> Vec<String> {
         .expect("Parsing json containing available nixosConfigurations failed.")
 }
 
-pub fn get_options() -> super::parse::NixValue {
+pub fn get_options() -> Result<super::parse::NixValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixos.json");
-    if let Ok(content) = load_json_file(&cache_file) {
-        return serde_json::from_str(&content)
-            .expect("Parsing json produced by cached `extract.nix` failed");
-    }
-
     let file = Path::new("extract.nix");
-    let command = run_nix_file(&file);
 
-    if let Ok(output) = command {
-        if output.status.success() {
-            return serde_json::from_slice(&output.stdout)
-                .expect("Parsing json produced by `extract.nix` failed");
-        } else {
-            match output.status {
-                other => eprintln!(
-                    "Exited with status: {}\nError output: {}",
-                    other,
-                    String::from_utf8(output.stderr)
-                        .expect("Command outputted nonvalid UTF-8 text")
-                ),
-            }
-        }
-    }
-    unimplemented!()
+    load_from_cache_or_eval(file, cache_file)
 }
 
-pub fn get_config() -> super::parse::NixGuardedValue {
+pub fn get_config() -> Result<super::parse::NixGuardedValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixosConfig.json");
-    if let Ok(content) = load_json_file(&cache_file) {
-        return serde_json::from_str(&content)
-            .expect("Parsing json produced by cached `extractConfig.nix` failed");
-    }
-
     let file = Path::new("extractConfig.nix");
-    let command = run_nix_file(&file);
 
-    if let Ok(output) = command {
-        if output.status.success() {
-            return serde_json::from_slice(&output.stdout)
-                .expect("Parsing json produced by `extractConfig.nix` failed");
-        } else {
-            match output.status {
-                other => eprintln!(
-                    "Exited with status: {}\nError output: {}",
-                    other,
-                    String::from_utf8(output.stderr)
-                        .expect("Command outputted nonvalid UTF-8 text")
-                ),
-            }
-        }
-    }
-    unimplemented!()
+    load_from_cache_or_eval(file, cache_file)
 }
