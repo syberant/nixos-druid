@@ -1,9 +1,10 @@
-use std::io::Error;
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::{BufReader, Error, Read};
+use std::path::Path;
 use std::process::{Command, Output};
 
 // TODO: Implement caching?
-pub fn run_nix_file(file: &Path) -> Result<Output, Error> {
+fn run_nix_file(file: &Path) -> Result<Output, Error> {
     Command::new("nix-instantiate")
         .args([
             "--json",
@@ -12,6 +13,14 @@ pub fn run_nix_file(file: &Path) -> Result<Output, Error> {
             file.to_str().expect("UTF-8 validation of file path failed"),
         ])
         .output()
+}
+
+fn load_json_file(name: &Path) -> std::io::Result<String> {
+    let file = File::open(name)?;
+    let mut buf_reader = BufReader::new(file);
+    let mut content = String::new();
+    buf_reader.read_to_string(&mut content)?;
+    Ok(content)
 }
 
 /// Returns a list with all the attribute names of <flake>.nixosConfigurations
@@ -31,6 +40,12 @@ pub fn get_available_nixos_configurations() -> Vec<String> {
 }
 
 pub fn get_options() -> super::parse::NixValue {
+    let cache_file = Path::new("/tmp/nixos.json");
+    if let Ok(content) = load_json_file(&cache_file) {
+        return serde_json::from_str(&content)
+            .expect("Parsing json produced by cached `extract.nix` failed");
+    }
+
     let file = Path::new("extract.nix");
     let command = run_nix_file(&file);
 
@@ -53,6 +68,12 @@ pub fn get_options() -> super::parse::NixValue {
 }
 
 pub fn get_config() -> super::parse::NixGuardedValue {
+    let cache_file = Path::new("/tmp/nixosConfig.json");
+    if let Ok(content) = load_json_file(&cache_file) {
+        return serde_json::from_str(&content)
+            .expect("Parsing json produced by cached `extractConfig.nix` failed");
+    }
+
     let file = Path::new("extractConfig.nix");
     let command = run_nix_file(&file);
 
