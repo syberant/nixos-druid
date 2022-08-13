@@ -14,6 +14,22 @@ pub fn run_nix_file(file: &Path) -> Result<Output, Error> {
         .output()
 }
 
+/// Returns a list with all the attribute names of <flake>.nixosConfigurations
+pub fn get_available_nixos_configurations() -> Vec<String> {
+    let result = Command::new("nix-instantiate")
+        .args([
+            "--eval",
+            "--strict",
+            "--json",
+            "-E",
+            "with builtins; attrNames (getFlake \"/etc/nixos\").nixosConfigurations",
+        ])
+        .output();
+
+    serde_json::from_slice(&result.unwrap().stdout)
+        .expect("Parsing json containing available nixosConfigurations failed.")
+}
+
 pub fn get_options() -> super::parse::NixValue {
     let file = Path::new("extract.nix");
     let command = run_nix_file(&file);
