@@ -1,5 +1,5 @@
 mod node;
-use node::{OptionDocumentation, OptionNode, OptionType};
+use node::{OptionDocumentation, OptionNode};
 
 // Copyright 2022 The Druid Authors, Sybrand Aarnoutse.
 //
@@ -19,23 +19,17 @@ use node::{OptionDocumentation, OptionNode, OptionType};
 // filesystem whatsoever). It's intended to use most of the features of
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
-use std::cmp::Ordering;
-use std::sync::Arc;
 
-use nixos_druid::parse::{NixGuardedValue, NixOption, NixSet, NixTypeValue, NixValue};
+use nixos_druid::parse::NixGuardedValue;
 
-use druid::im::Vector;
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{
-    AppLauncher, ArcStr, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
-    LifeCycleCtx, LocalizedString, Menu, MenuItem, PaintCtx, Point, Selector, Target, UpdateCtx,
-    Widget, WidgetExt, WidgetId, WidgetPod, WindowDesc,
+    AppLauncher, BoxConstraints, Data, Env, Event, EventCtx, LayoutCtx, Lens, LifeCycle,
+    LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector, UpdateCtx,
+    Widget, WidgetExt, WidgetPod, WindowDesc,
 };
-use druid_widget_nursery::tree::{
-    ChrootStatus, Tree, TreeNode, TREE_ACTIVATE_NODE, TREE_CHILD_SHOW, TREE_CHROOT, TREE_CHROOT_UP,
-    TREE_NOTIFY_CHROOT, TREE_NOTIFY_PARENT,
-};
+use druid_widget_nursery::tree::{Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT};
 
 use druid_widget_nursery::selectors;
 
