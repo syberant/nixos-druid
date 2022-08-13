@@ -364,7 +364,7 @@ pub fn main() {
     // Create the main window
     let main_window = WindowDesc::new(ui_builder())
         .window_size((600.0, 600.0))
-        .title(LocalizedString::new("NixOS option browser").with_placeholder("nixos-druid"));
+        .title(LocalizedString::new("nixos-option-browser-window-title").with_placeholder("NixOS Options Browser"));
 
     let root = nixos_druid::run::get_options();
     eprintln!("Parsing options is done.");

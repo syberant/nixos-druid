@@ -261,7 +261,7 @@ pub fn main() {
     // Create the main window
     let main_window = WindowDesc::new(ui_builder())
         .window_size((600.0, 600.0))
-        .title(LocalizedString::new("tree-demo-window-title").with_placeholder("Tree Demo"));
+        .title(LocalizedString::new("nixos-config-browser-window-title").with_placeholder("NixOS Config Browser"));
 
     let option_root = nixos_druid::run::get_options();
     eprintln!("Parsing options is done.");
