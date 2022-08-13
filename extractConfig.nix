@@ -23,5 +23,8 @@ let
     # services.gitlab = null;
   };
 
-  inherit (import ./utilities.nix { inherit lib; }) catchErrors;
+
+  # NOTE: As part of a horrible hack ./utilities.nix is inlined at compile time so that the executable works standalone
+  # utilities = import ./utilities.nix;
+  inherit (utilities { inherit lib; }) catchErrors;
 in catchErrors config

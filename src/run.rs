@@ -4,6 +4,10 @@ use std::io::{BufReader, Error, Read};
 use std::path::Path;
 use std::process::{Command, Output};
 
+const EXTRACT_NIX: &'static str = include_str!("../extract.nix");
+const UTILITIES_NIX: &'static str = include_str!("../utilities.nix");
+const EXTRACT_CONFIG_NIX: &'static str = include_str!("../extractConfig.nix");
+
 #[derive(Debug)]
 pub enum LoadJsonError {
     /// Errors where the command could not be properly called
@@ -14,13 +18,25 @@ pub enum LoadJsonError {
     FailedEval(String),
 }
 
-fn run_nix_file(file: &Path) -> Result<Output, Error> {
+pub fn run_nix_file(file: &Path) -> Result<Output, Error> {
     Command::new("nix-instantiate")
         .args([
             "--json",
             "--strict",
             "--eval",
             file.to_str().expect("UTF-8 validation of file path failed"),
+        ])
+        .output()
+}
+
+pub fn run_nix_str(nix_code: &str) -> Result<Output, Error> {
+    Command::new("nix-instantiate")
+        .args([
+            "--json",
+            "--strict",
+            "--eval",
+            "-E",
+            nix_code
         ])
         .output()
 }
@@ -34,7 +50,7 @@ fn load_json_file(name: &Path) -> std::io::Result<String> {
 }
 
 fn load_from_cache_or_eval<V: DeserializeOwned>(
-    file: &Path,
+    nix_code: &str,
     cache_file: &Path,
 ) -> Result<V, LoadJsonError> {
     if let Ok(content) = load_json_file(cache_file) {
@@ -43,13 +59,12 @@ fn load_from_cache_or_eval<V: DeserializeOwned>(
         } else {
             eprintln!(
                 "Parsing json produced by cached `{}` failed, ignoring cache",
-                file.display()
+                cache_file.display()
             );
         }
     }
 
-    let command = run_nix_file(file);
-
+    let command = run_nix_str(nix_code);
     match command {
         Ok(output) => {
             if output.status.success() {
@@ -68,15 +83,7 @@ fn load_from_cache_or_eval<V: DeserializeOwned>(
 
 /// Returns a list with all the attribute names of <flake>.nixosConfigurations
 pub fn get_available_nixos_configurations() -> Vec<String> {
-    let result = Command::new("nix-instantiate")
-        .args([
-            "--eval",
-            "--strict",
-            "--json",
-            "-E",
-            "with builtins; attrNames (getFlake \"/etc/nixos\").nixosConfigurations",
-        ])
-        .output();
+    let result = run_nix_str("with builtins; attrNames (getFlake \"/etc/nixos\").nixosConfigurations");
 
     serde_json::from_slice(&result.unwrap().stdout)
         .expect("Parsing json containing available nixosConfigurations failed.")
@@ -84,14 +91,16 @@ pub fn get_available_nixos_configurations() -> Vec<String> {
 
 pub fn get_options() -> Result<super::parse::NixValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixos.json");
-    let file = Path::new("extract.nix");
+    // TODO: Fix this horrible hack inlining ./utilities.nix
+    let text = format!("let utilities =\n{UTILITIES_NIX};\nin\n{EXTRACT_NIX}");
 
-    load_from_cache_or_eval(file, cache_file)
+    load_from_cache_or_eval(text.as_str(), cache_file)
 }
 
 pub fn get_config() -> Result<super::parse::NixGuardedValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixosConfig.json");
-    let file = Path::new("extractConfig.nix");
+    // TODO: Fix this horrible hack inlining ./utilities.nix
+    let text = format!("let utilities =\n{UTILITIES_NIX};\nin\n{EXTRACT_CONFIG_NIX}");
 
-    load_from_cache_or_eval(file, cache_file)
+    load_from_cache_or_eval(text.as_str(), cache_file)
 }
