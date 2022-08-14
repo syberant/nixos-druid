@@ -4,9 +4,9 @@ use std::io::{BufReader, Error, Read};
 use std::path::Path;
 use std::process::{Command, Output};
 
-const EXTRACT_NIX: &'static str = include_str!("../extract.nix");
-const UTILITIES_NIX: &'static str = include_str!("../utilities.nix");
-const EXTRACT_CONFIG_NIX: &'static str = include_str!("../extractConfig.nix");
+const EXTRACT_NIX: &'static str = include_str!("../nix-scripts/extract.nix");
+const UTILITIES_NIX: &'static str = include_str!("../nix-scripts/utilities.nix");
+const EXTRACT_CONFIG_NIX: &'static str = include_str!("../nix-scripts/extractConfig.nix");
 
 #[derive(Debug)]
 pub enum LoadJsonError {

@@ -3,7 +3,7 @@ with builtins;
 let
   # Load flake
   osConf = (getFlake "/etc/nixos").nixosConfigurations;
-  computer = osConf.nixos-macbook;
+  computer = osConf.nixos-desktop;
 
   # Get necessary components
   lib = computer.pkgs.lib;
