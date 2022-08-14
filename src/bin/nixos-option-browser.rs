@@ -21,6 +21,7 @@ use node::{OptionDocumentation, OptionNode};
 // probably lacks a lot of features, we want to focus on the tree widget here.
 
 use nixos_druid::parse::NixGuardedValue;
+use nixos_druid::view::Opener;
 
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
@@ -30,7 +31,7 @@ use druid::{
     Target, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{
-    Tree, TreeNode, TREE_ACTIVATE_NODE, TREE_CHILD_SHOW, TREE_CHROOT,
+    Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT,
 };
 
 use druid_widget_nursery::selectors;
@@ -157,95 +158,6 @@ impl Widget<OptionNode> for OptionNodeWidget {
     }
 }
 
-/// Opener is the opener widget, the small icon the user interacts with to
-/// expand directories.
-struct Opener {
-    label: WidgetPod<String, Label<String>>,
-}
-
-impl Opener {
-    // TODO: Nice icons
-    fn label(&self, data: &OptionNode) -> String {
-        if let Some(ref t) = data.option_type {
-            if t.has_nested_submodule() {
-                if data.expanded {
-                    "📖"
-                } else {
-                    "📕"
-                }
-            } else {
-                match data.name.as_ref() {
-                    "enable" => "✅",
-                    _ => "⚙️",
-                }
-            }
-        } else {
-            if data.expanded {
-                "📂"
-            } else {
-                "📁"
-            }
-        }
-        .to_owned()
-    }
-}
-
-impl Widget<OptionNode> for Opener {
-    fn event(&mut self, _ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, _env: &Env) {
-        if data.is_branch() {
-            match event {
-                // The wrapping tree::Opener widget transforms a click to this command.
-                Event::Command(cmd) if cmd.is(TREE_ACTIVATE_NODE) => {
-                    // We care only for branches (we could of course imagine interactions with files too)
-                    if data.is_branch() {
-                        data.expanded = !data.expanded;
-                    }
-                }
-                _ => (),
-            }
-        }
-    }
-
-    fn lifecycle(
-        &mut self,
-        ctx: &mut LifeCycleCtx,
-        event: &LifeCycle,
-        data: &OptionNode,
-        env: &Env,
-    ) {
-        let label = self.label(data);
-        self.label.lifecycle(ctx, event, &label, env);
-    }
-
-    fn update(&mut self, ctx: &mut UpdateCtx, old_data: &OptionNode, data: &OptionNode, env: &Env) {
-        if old_data.expanded != data.expanded {
-            let label = self.label(data);
-            self.label.update(ctx, &label, env);
-        }
-        if data.is_branch() {
-            self.label.update(ctx, &self.label(data), env);
-        }
-    }
-
-    fn layout(
-        &mut self,
-        ctx: &mut LayoutCtx,
-        bc: &BoxConstraints,
-        data: &OptionNode,
-        env: &Env,
-    ) -> Size {
-        let label = self.label(data);
-        let size = self.label.layout(ctx, bc, &label, env);
-        self.label.set_origin(ctx, &label, env, Point::ORIGIN);
-        size
-    }
-
-    fn paint(&mut self, ctx: &mut PaintCtx, data: &OptionNode, env: &Env) {
-        let label = self.label(data);
-        self.label.paint(ctx, &label, env)
-    }
-}
-
 #[derive(Clone, Data, Lens)]
 struct DisplayData {
     documentation: Option<OptionDocumentation>,
@@ -314,9 +226,7 @@ fn ui_builder() -> impl Widget<UiData> {
         // The boolean deciding whether the tree should expand or not, acquired via Lens
         OptionNode::expanded,
     )
-    .with_opener(|| Opener {
-        label: WidgetPod::new(Label::dynamic(|st: &String, _| st.clone())),
-    })
+    .with_opener(|| Opener::new())
     .lens(UiData::tree);
 
     let wrapped_tree = Scroll::new(tree);

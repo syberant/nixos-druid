@@ -1,6 +1,7 @@
 use druid::im;
 use druid::{Data, Lens};
-use nixos_druid::parse::{NixGuardedValue, NixTypeValue, NixOption, NixValue};
+use nixos_druid::parse::{NixGuardedValue, NixOption, NixTypeValue, NixValue};
+use nixos_druid::tree_node::TreeOptionNode;
 
 #[derive(Clone, Data, Debug, Lens)]
 pub struct OptionDocumentation {
@@ -240,6 +241,41 @@ impl OptionNode {
                 c.add_config(child_cfg);
             }
         }
+    }
+}
+
+impl TreeOptionNode for OptionNode {
+    // TODO: Nice icons
+    fn get_icon(&self) -> String {
+        if let Some(ref t) = self.option_type {
+            if t.has_nested_submodule() {
+                if self.expanded {
+                    "📖"
+                } else {
+                    "📕"
+                }
+            } else {
+                match self.name.as_ref() {
+                    "enable" => "✅",
+                    _ => "⚙️",
+                }
+            }
+        } else {
+            if self.expanded {
+                "📂"
+            } else {
+                "📁"
+            }
+        }
+        .to_owned()
+    }
+
+    fn is_expanded(&self) -> bool {
+        self.expanded
+    }
+
+    fn toggle_expanded(&mut self) {
+        self.expanded = !self.expanded;
     }
 }
 
