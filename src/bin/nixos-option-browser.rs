@@ -1,5 +1,5 @@
 mod node;
-use node::{OptionDocumentation, OptionNode};
+use node::OptionNode;
 
 // Copyright 2022 The Druid Authors, Sybrand Aarnoutse.
 //
@@ -20,6 +20,7 @@ use node::{OptionDocumentation, OptionNode};
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
 
+use nixos_druid::data::{DisplayData, OptionDocumentation};
 use nixos_druid::parse::NixGuardedValue;
 use nixos_druid::view::Opener;
 
@@ -30,9 +31,7 @@ use druid::{
     Handled, LayoutCtx, Lens, LifeCycle, LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector,
     Target, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
 };
-use druid_widget_nursery::tree::{
-    Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT,
-};
+use druid_widget_nursery::tree::{Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT};
 
 use druid_widget_nursery::selectors;
 
@@ -99,10 +98,10 @@ impl Widget<OptionNode> for OptionNodeWidget {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, env: &Env) {
         let new_event = match event {
             Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                ctx.submit_command(FOCUS_OPTION.with(DisplayData {
-                    documentation: data.documentation.clone(),
-                    value: data.value.clone(),
-                }));
+                ctx.submit_command(FOCUS_OPTION.with(DisplayData::new_with(
+                    data.documentation.clone(),
+                    data.value.clone(),
+                )));
 
                 // Event handled, don't propagate
                 None
@@ -155,33 +154,6 @@ impl Widget<OptionNode> for OptionNodeWidget {
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &OptionNode, env: &Env) {
         self.0.paint(ctx, data, env)
-    }
-}
-
-#[derive(Clone, Data, Lens)]
-struct DisplayData {
-    documentation: Option<OptionDocumentation>,
-    // FIXME: Very hacky, maybe implement PartialEq?
-    #[data(ignore)]
-    value: Option<NixGuardedValue>,
-}
-
-impl std::fmt::Display for DisplayData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (self.documentation.as_ref(), self.value.as_ref()) {
-            (None, _) => write!(f, "No documentation available."),
-            (Some(ref d), Some(ref v)) => write!(f, "Value: {}\n\n\n{}", v, d),
-            (Some(ref d), None) => d.fmt(f),
-        }
-    }
-}
-
-impl DisplayData {
-    fn new() -> Self {
-        Self {
-            documentation: None,
-            value: None,
-        }
     }
 }
 

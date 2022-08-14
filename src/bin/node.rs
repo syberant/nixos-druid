@@ -1,47 +1,8 @@
 use druid::im;
 use druid::{Data, Lens};
+use nixos_druid::data::OptionDocumentation;
 use nixos_druid::parse::{NixGuardedValue, NixOption, NixTypeValue, NixValue};
 use nixos_druid::tree_node::TreeOptionNode;
-
-#[derive(Clone, Data, Debug, Lens)]
-pub struct OptionDocumentation {
-    pub description: String,
-    pub type_name: String,
-    #[data(ignore)]
-    pub default: Option<NixGuardedValue>,
-    #[data(ignore)]
-    pub example: Option<NixGuardedValue>,
-}
-
-impl From<&NixOption> for OptionDocumentation {
-    fn from(opt: &NixOption) -> Self {
-        Self {
-            description: opt.description.clone(),
-            type_name: opt.r#type.to_string(),
-            default: opt.default.clone(),
-            example: opt.example.clone(),
-        }
-    }
-}
-
-impl std::fmt::Display for OptionDocumentation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Description: {}\n\nType: {}",
-            self.description, self.type_name
-        )?;
-
-        if let Some(ref def) = self.default {
-            write!(f, "\n\nDefault: {}", def)?;
-        }
-        if let Some(ref ex) = self.example {
-            write!(f, "\n\nExample: {}", ex)?;
-        }
-
-        write!(f, "")
-    }
-}
 
 #[derive(Clone, Data, Debug, Lens)]
 pub struct OptionNode {
