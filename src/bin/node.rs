@@ -1,5 +1,6 @@
 use druid::im;
 use druid::{Data, Lens};
+use nixos_druid::data::DisplayData;
 use nixos_druid::data::OptionDocumentation;
 use nixos_druid::parse::{NixGuardedValue, NixTypeValue, NixValue};
 use nixos_druid::tree_node::TreeOptionNode;
@@ -231,6 +232,10 @@ impl TreeOptionNode for OptionNode {
         .to_owned()
     }
 
+    fn focused_display_data(&self) -> DisplayData {
+        DisplayData::new_with(self.documentation.clone(), self.value.clone())
+    }
+
     fn is_expanded(&self) -> bool {
         self.expanded
     }
@@ -366,6 +371,8 @@ impl From<NixTypeValue> for OptionType {
                         "path" => Path,
                         "package" => Package,
 
+                        // TODO: Parse enum
+                        // "enum" => Enum(t.functorPayload),
                         _ => Unknown(Type(t).to_string()),
                     }
                 }

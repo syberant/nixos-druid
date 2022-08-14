@@ -20,24 +20,17 @@ use node::OptionNode;
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
 
+use nixos_druid::controller::FocusOption;
 use nixos_druid::data::{AppData, DisplayData};
 use nixos_druid::delegate::Delegate;
-use nixos_druid::delegate::FOCUS_OPTION;
 
-use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
-use druid::{
-    AppLauncher, BoxConstraints, Env, Event, EventCtx, LayoutCtx, LifeCycle, LifeCycleCtx,
-    LocalizedString, PaintCtx, Point, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
-};
-use druid_widget_nursery::tree::{Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT};
+use druid::{AppLauncher, LocalizedString, Widget, WidgetExt, WindowDesc};
+use druid_widget_nursery::tree::{Tree, TreeNode};
 
 use druid_widget_nursery::selectors;
 
 selectors! {
-    /// Command sent by the context menu to chroot to the targeted directory
-    CHROOT,
-
     /// Internal wiring, mostly to update the filetype and the sorting
     UPDATE_DIR_VIEW,
     UPDATE_FILE,
@@ -69,84 +62,22 @@ impl TreeNode for OptionNode {
     }
 }
 
-struct OptionNodeWidget(WidgetPod<OptionNode, Flex<OptionNode>>);
-
-impl OptionNodeWidget {
-    fn new() -> Self {
-        Self(WidgetPod::new(
-            Flex::row()
-                .with_default_spacer()
-                .with_child(Label::dynamic(|data: &OptionNode, _env| data.name.clone())),
-        ))
-    }
-}
-
-impl Widget<OptionNode> for OptionNodeWidget {
-    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, env: &Env) {
-        let new_event = match event {
-            Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                ctx.submit_command(FOCUS_OPTION.with(DisplayData::new_with(
-                    data.documentation.clone(),
-                    data.value.clone(),
-                )));
-
-                // Event handled, don't propagate
-                None
-            }
-            Event::Command(cmd) if cmd.is(TREE_CHILD_SHOW) => None,
-            Event::Command(cmd) if cmd.is(CHROOT) => {
-                ctx.submit_notification(TREE_CHROOT);
-                None
-            }
-            _ => Some(event),
-        };
-
-        if let Some(evt) = new_event {
-            self.0.event(ctx, evt, data, env);
-        }
-    }
-
-    fn lifecycle(
-        &mut self,
-        ctx: &mut LifeCycleCtx,
-        event: &LifeCycle,
-        data: &OptionNode,
-        env: &Env,
-    ) {
-        self.0.lifecycle(ctx, event, data, env);
-    }
-
-    fn update(
-        &mut self,
-        ctx: &mut UpdateCtx,
-        _old_data: &OptionNode,
-        data: &OptionNode,
-        env: &Env,
-    ) {
-        self.0.update(ctx, data, env)
-    }
-
-    fn layout(
-        &mut self,
-        ctx: &mut LayoutCtx,
-        bc: &BoxConstraints,
-        data: &OptionNode,
-        env: &Env,
-    ) -> Size {
-        let size = self.0.layout(ctx, bc, data, env);
-        self.0.set_origin(ctx, data, env, Point::ORIGIN);
-        ctx.set_paint_insets(self.0.paint_insets());
-        size
-    }
-
-    fn paint(&mut self, ctx: &mut PaintCtx, data: &OptionNode, env: &Env) {
-        self.0.paint(ctx, data, env)
-    }
-}
-
 fn ui_builder() -> impl Widget<AppData<OptionNode>> {
     let tree = Tree::new(
-        || OptionNodeWidget::new(),
+        || {
+            Flex::row()
+                .with_default_spacer()
+                .with_child(Label::dynamic(|data: &OptionNode, _env| {
+                    if let Some(ref t) = data.option_type {
+                        if let Some(ext) = t.get_name_extension() {
+                            return format!("{}.{}", data.name, ext);
+                        }
+                    }
+
+                    data.name.clone()
+                }))
+                .controller(FocusOption::new())
+        },
         // The boolean deciding whether the tree should expand or not, acquired via Lens
         OptionNode::expanded,
     )
