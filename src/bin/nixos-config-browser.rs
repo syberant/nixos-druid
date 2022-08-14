@@ -67,15 +67,7 @@ fn ui_builder() -> impl Widget<AppData<OptionNode>> {
         || {
             Flex::row()
                 .with_default_spacer()
-                .with_child(Label::dynamic(|data: &OptionNode, _env| {
-                    if let Some(ref t) = data.option_type {
-                        if let Some(ext) = t.get_name_extension() {
-                            return format!("{}.{}", data.name, ext);
-                        }
-                    }
-
-                    data.name.clone()
-                }))
+                .with_child(Label::dynamic(|data: &OptionNode, _env| data.name.clone()))
                 .controller(FocusOption::new())
         },
         // The boolean deciding whether the tree should expand or not, acquired via Lens
