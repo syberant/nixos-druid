@@ -23,6 +23,7 @@ use node::OptionNode;
 use nixos_druid::controller::FocusOption;
 use nixos_druid::data::{AppData, DisplayData};
 use nixos_druid::delegate::Delegate;
+use nixos_druid::view::Opener;
 
 use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{AppLauncher, LocalizedString, Widget, WidgetExt, WindowDesc};
@@ -73,6 +74,7 @@ fn ui_builder() -> impl Widget<AppData<OptionNode>> {
         // The boolean deciding whether the tree should expand or not, acquired via Lens
         OptionNode::expanded,
     )
+    .with_opener(|| Opener::new())
     .lens(AppData::tree);
 
     let wrapped_tree = Scroll::new(tree);
