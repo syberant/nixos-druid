@@ -1,7 +1,7 @@
 use druid::im;
 use druid::{Data, Lens};
 use nixos_druid::data::OptionDocumentation;
-use nixos_druid::parse::{NixGuardedValue, NixOption, NixTypeValue, NixValue};
+use nixos_druid::parse::{NixGuardedValue, NixTypeValue, NixValue};
 use nixos_druid::tree_node::TreeOptionNode;
 
 #[derive(Clone, Data, Debug, Lens)]

@@ -20,23 +20,20 @@ use node::OptionNode;
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
 
-use nixos_druid::data::{DisplayData, OptionDocumentation};
-use nixos_druid::parse::NixGuardedValue;
+use nixos_druid::data::{AppData, DisplayData};
+use nixos_druid::delegate::{Delegate, FOCUS_OPTION};
 use nixos_druid::view::Opener;
 
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{
-    AppDelegate, AppLauncher, BoxConstraints, Command, Data, DelegateCtx, Env, Event, EventCtx,
-    Handled, LayoutCtx, Lens, LifeCycle, LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector,
-    Target, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
+    AppLauncher, BoxConstraints, Env, Event, EventCtx,
+    LayoutCtx, LifeCycle, LifeCycleCtx, LocalizedString, PaintCtx, Point,
+    UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT};
 
 use druid_widget_nursery::selectors;
-
-/// Open this option in the option editor
-const FOCUS_OPTION: Selector<DisplayData> = Selector::new("main.focus-option");
 
 selectors! {
     /// Command sent by the context menu to chroot to the targeted directory
@@ -157,52 +154,17 @@ impl Widget<OptionNode> for OptionNodeWidget {
     }
 }
 
-#[derive(Clone, Data, Lens)]
-struct UiData {
-    tree: OptionNode,
-    display: DisplayData,
-}
-
-impl UiData {
-    fn new(tree: OptionNode) -> Self {
-        Self {
-            tree,
-            display: DisplayData::new(),
-        }
-    }
-}
-
-struct Delegate;
-
-impl AppDelegate<UiData> for Delegate {
-    fn command(
-        &mut self,
-        _ctx: &mut DelegateCtx,
-        _target: Target,
-        cmd: &Command,
-        data: &mut UiData,
-        _env: &Env,
-    ) -> Handled {
-        if let Some(doc) = cmd.get(FOCUS_OPTION) {
-            data.display = doc.clone();
-            Handled::Yes
-        } else {
-            Handled::No
-        }
-    }
-}
-
-fn ui_builder() -> impl Widget<UiData> {
+fn ui_builder() -> impl Widget<AppData<OptionNode>> {
     let tree = Tree::new(
         || OptionNodeWidget::new(),
         // The boolean deciding whether the tree should expand or not, acquired via Lens
         OptionNode::expanded,
     )
     .with_opener(|| Opener::new())
-    .lens(UiData::tree);
+    .lens(AppData::tree);
 
     let wrapped_tree = Scroll::new(tree);
-    let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(UiData::display);
+    let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(AppData::display);
 
     Split::columns(wrapped_tree, label)
         .split_point(0.3)
@@ -223,12 +185,12 @@ pub fn main() {
     let root_name = "NixOS Configuration".to_string();
     let tree = OptionNode::new(root_name, root);
 
-    let data = UiData::new(tree);
+    let data = AppData::new(tree);
     eprintln!("GUI `Data` is built.");
 
     // start the application
     AppLauncher::with_window(main_window)
-        .delegate(Delegate)
+        .delegate(Delegate::new())
         // .log_to_console()
         .launch(data)
         .expect("launch failed");
