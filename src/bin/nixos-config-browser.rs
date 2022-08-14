@@ -1,5 +1,5 @@
 mod node;
-use node::{OptionDocumentation, OptionNode};
+use node::OptionNode;
 
 // Copyright 2022 The Druid Authors, Sybrand Aarnoutse.
 //
@@ -20,21 +20,19 @@ use node::{OptionDocumentation, OptionNode};
 // the `Tree` widget in a familiar context. It's by no mean polished, and
 // probably lacks a lot of features, we want to focus on the tree widget here.
 
-use nixos_druid::parse::NixGuardedValue;
+use nixos_druid::data::{AppData, DisplayData};
+use nixos_druid::delegate::Delegate;
+use nixos_druid::delegate::FOCUS_OPTION;
 
 use druid::kurbo::Size;
 use druid::widget::{Flex, Label, Scroll, Split};
 use druid::{
-    AppDelegate, AppLauncher, BoxConstraints, Command, Data, DelegateCtx, Env, Event, EventCtx,
-    Handled, LayoutCtx, Lens, LifeCycle, LifeCycleCtx, LocalizedString, PaintCtx, Point, Selector,
-    Target, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
+    AppLauncher, BoxConstraints, Env, Event, EventCtx, LayoutCtx, LifeCycle, LifeCycleCtx,
+    LocalizedString, PaintCtx, Point, UpdateCtx, Widget, WidgetExt, WidgetPod, WindowDesc,
 };
 use druid_widget_nursery::tree::{Tree, TreeNode, TREE_CHILD_SHOW, TREE_CHROOT};
 
 use druid_widget_nursery::selectors;
-
-/// Open this option in the option editor
-const FOCUS_OPTION: Selector<DisplayData> = Selector::new("main.focus-option");
 
 selectors! {
     /// Command sent by the context menu to chroot to the targeted directory
@@ -87,10 +85,10 @@ impl Widget<OptionNode> for OptionNodeWidget {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut OptionNode, env: &Env) {
         let new_event = match event {
             Event::MouseDown(ref mouse) if mouse.button.is_left() => {
-                ctx.submit_command(FOCUS_OPTION.with(DisplayData {
-                    documentation: data.documentation.clone(),
-                    value: data.value.clone(),
-                }));
+                ctx.submit_command(FOCUS_OPTION.with(DisplayData::new_with(
+                    data.documentation.clone(),
+                    data.value.clone(),
+                )));
 
                 // Event handled, don't propagate
                 None
@@ -146,78 +144,16 @@ impl Widget<OptionNode> for OptionNodeWidget {
     }
 }
 
-#[derive(Clone, Data, Lens)]
-struct DisplayData {
-    documentation: Option<OptionDocumentation>,
-    // FIXME: Very hacky, maybe implement PartialEq?
-    #[data(ignore)]
-    value: Option<NixGuardedValue>,
-}
-
-impl std::fmt::Display for DisplayData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match (self.documentation.as_ref(), self.value.as_ref()) {
-            (None, _) => write!(f, "No documentation available."),
-            (Some(ref d), Some(ref v)) => write!(f, "Value: {}\n\n\n{}", v, d),
-            (Some(ref d), None) => d.fmt(f),
-        }
-    }
-}
-
-impl DisplayData {
-    fn new() -> Self {
-        Self {
-            documentation: None,
-            value: None,
-        }
-    }
-}
-
-#[derive(Clone, Data, Lens)]
-struct UiData {
-    tree: OptionNode,
-    display: DisplayData,
-}
-
-impl UiData {
-    fn new(tree: OptionNode) -> Self {
-        Self {
-            tree,
-            display: DisplayData::new(),
-        }
-    }
-}
-
-struct Delegate;
-
-impl AppDelegate<UiData> for Delegate {
-    fn command(
-        &mut self,
-        _ctx: &mut DelegateCtx,
-        _target: Target,
-        cmd: &Command,
-        data: &mut UiData,
-        _env: &Env,
-    ) -> Handled {
-        if let Some(doc) = cmd.get(FOCUS_OPTION) {
-            data.display = doc.clone();
-            Handled::Yes
-        } else {
-            Handled::No
-        }
-    }
-}
-
-fn ui_builder() -> impl Widget<UiData> {
+fn ui_builder() -> impl Widget<AppData<OptionNode>> {
     let tree = Tree::new(
         || OptionNodeWidget::new(),
         // The boolean deciding whether the tree should expand or not, acquired via Lens
         OptionNode::expanded,
     )
-    .lens(UiData::tree);
+    .lens(AppData::tree);
 
     let wrapped_tree = Scroll::new(tree);
-    let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(UiData::display);
+    let label = Label::dynamic(|data: &DisplayData, _| data.to_string()).lens(AppData::display);
 
     Split::columns(wrapped_tree, label)
         .split_point(0.3)
@@ -241,12 +177,12 @@ pub fn main() {
     let mut option_tree = OptionNode::new(root_name, option_root);
     option_tree.add_config(Some(config_root));
 
-    let data = UiData::new(option_tree);
+    let data = AppData::new(option_tree);
     eprintln!("GUI `Data` is built.");
 
     // start the application
     AppLauncher::with_window(main_window)
-        .delegate(Delegate)
+        .delegate(Delegate::new())
         // .log_to_console()
         .launch(data)
         .expect("launch failed");
