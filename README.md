@@ -14,7 +14,7 @@ The following screenshot shows the `nixos-option-browser` opened with the `conta
 ![nixos-option-browser](./screenshots/options_browser.jpg)
 
 ## nixos-config-browser
-This allows viewing the documentation like `nixos-option-browser` but now also shows the final configuration value like `nixos-option` and `` do.
+This allows viewing the documentation like `nixos-option-browser` but now also shows the final configuration value like `nixos-option` and a `nix repl` with `(builtins.getFlake "/etc/nixos").nixosConfigurations.hostname.config` do.
 
 Showing the value of `nixpkgs.localSystem`:
 ![](./screenshots/configuration_browser_localSystem.jpg)
