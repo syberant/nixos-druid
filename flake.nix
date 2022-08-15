@@ -27,7 +27,7 @@
 
           meta = with pkgs.lib; {
             description = "WIP GUI for NixOS";
-            homepage = "https://gitlab.science.ru.nl/sybrandaarnoutse/nixos-druid";
+            homepage = "https://github.com/syberant/nixos-druid";
             # TODO: Pick license
             # license = licenses.;
             maintainers = with maintainers; [ syberant ];
