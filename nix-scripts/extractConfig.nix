@@ -1,9 +1,14 @@
 with builtins;
 
 let
+  # NOTE: As part of a horrible hack ./utilities.nix is inlined at runtime so that the executable works standalone.
+  # utilities = import ./utilities.nix;
+  # These variables are inlined as arguments as well.
+  # flakePath = "/etc/nixos";
+  # hostname = "nixos-desktop";
+
   # Load flake
-  osConf = (getFlake "/etc/nixos").nixosConfigurations;
-  computer = osConf.nixos-desktop;
+  computer = (getFlake flakePath).nixosConfigurations.${hostname};
 
   # Get necessary components
   lib = computer.pkgs.lib;
@@ -23,8 +28,5 @@ let
     # services.gitlab = null;
   };
 
-
-  # NOTE: As part of a horrible hack ./utilities.nix is inlined at compile time so that the executable works standalone
-  # utilities = import ./utilities.nix;
   inherit (utilities { inherit lib; }) catchErrors;
 in catchErrors config

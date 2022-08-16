@@ -82,11 +82,11 @@ fn load_from_cache_or_eval<V: DeserializeOwned>(
 }
 
 /// Returns a list with all the attribute names of <flake>.nixosConfigurations
-pub fn get_available_nixos_configurations() -> Vec<String> {
-    let result = run_nix_str("with builtins; attrNames (getFlake \"/etc/nixos\").nixosConfigurations");
+pub fn get_available_nixos_configurations(flake_path: &str) -> Option<Vec<String>> {
+    let cmd = format!("with builtins; attrNames (getFlake \"{flake_path}\").nixosConfigurations");
+    let result = run_nix_str(&cmd).ok()?;
 
-    serde_json::from_slice(&result.unwrap().stdout)
-        .expect("Parsing json containing available nixosConfigurations failed.")
+    serde_json::from_slice(&result.stdout).ok()
 }
 
 pub fn get_options() -> Result<super::parse::NixValue, LoadJsonError> {
@@ -97,10 +97,10 @@ pub fn get_options() -> Result<super::parse::NixValue, LoadJsonError> {
     load_from_cache_or_eval(text.as_str(), cache_file)
 }
 
-pub fn get_config() -> Result<super::parse::NixGuardedValue, LoadJsonError> {
+pub fn get_config(flake: &str, hostname: &str) -> Result<super::parse::NixGuardedValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixosConfig.json");
     // TODO: Fix this horrible hack inlining ./utilities.nix
-    let text = format!("let utilities =\n{UTILITIES_NIX};\nin\n{EXTRACT_CONFIG_NIX}");
+    let text = format!("let utilities =\n{UTILITIES_NIX};\nflakePath = \"{flake}\";hostname = \"{hostname}\";\nin\n{EXTRACT_CONFIG_NIX}");
 
     load_from_cache_or_eval(text.as_str(), cache_file)
 }
