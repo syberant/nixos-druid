@@ -1,12 +1,8 @@
+{ utilities ? import ./utilities.nix, flakePath ? "/etc/nixos", hostname }:
+
 with builtins;
 
 let
-  # NOTE: As part of a horrible hack ./utilities.nix is inlined at runtime so that the executable works standalone.
-  # utilities = import ./utilities.nix;
-  # These variables are inlined as arguments as well.
-  # flakePath = "/etc/nixos";
-  # hostname = "nixos-desktop";
-
   # Load flake
   computer = (getFlake flakePath).nixosConfigurations.${hostname};
 

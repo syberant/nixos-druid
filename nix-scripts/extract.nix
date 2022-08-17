@@ -7,14 +7,14 @@
 # Known bugs:
 # - Internal attributes within submodules are not filtered out (e.g. users.users.<name>._module.check)
 
+{ utilities ? import ./utilities.nix }:
+
 with builtins;
 
 let
   inherit (import <nixpkgs> { }) lib;
   nixosOptions = (import <nixpkgs/nixos> { configuration = { }; }).options;
 
-  # NOTE: As part of a horrible hack ./utilities.nix is inlined at compile time so that the executable works standalone
-  # utilities = import ./utilities.nix;
   inherit (utilities { inherit lib; }) catchJson;
 in with lib;
 

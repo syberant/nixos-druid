@@ -31,13 +31,30 @@ pub fn run_nix_file(file: &Path) -> Result<Output, Error> {
 
 pub fn run_nix_str(nix_code: &str) -> Result<Output, Error> {
     Command::new("nix-instantiate")
-        .args([
-            "--json",
-            "--strict",
-            "--eval",
-            "-E",
-            nix_code
-        ])
+        .args(["--json", "--strict", "--eval", "-E", nix_code])
+        .output()
+}
+
+pub fn run_nix_str_with_args<A, B, I>(nix_code: &str, args: I) -> Result<Output, Error>
+where
+    A: ToString,
+    B: ToString,
+    I: IntoIterator<Item = (bool, A, B)>,
+{
+    let formatted_args = args
+        .into_iter()
+        .map(|(string_arg, name, value)| {
+            [
+                if string_arg { "--argstr" } else { "--arg" }.to_string(),
+                name.to_string(),
+                value.to_string(),
+            ]
+        })
+        .flatten();
+
+    Command::new("nix-instantiate")
+        .args(["--json", "--strict", "--eval", "-E", nix_code])
+        .args(formatted_args)
         .output()
 }
 
@@ -49,10 +66,17 @@ fn load_json_file(name: &Path) -> std::io::Result<String> {
     Ok(content)
 }
 
-fn load_from_cache_or_eval<V: DeserializeOwned>(
+fn load_from_cache_or_eval<V, A, B, I>(
     nix_code: &str,
+    args: I,
     cache_file: &Path,
-) -> Result<V, LoadJsonError> {
+) -> Result<V, LoadJsonError>
+where
+    V: DeserializeOwned,
+    A: ToString,
+    B: ToString,
+    I: IntoIterator<Item = (bool, A, B)>,
+{
     if let Ok(content) = load_json_file(cache_file) {
         if let Ok(parsed) = serde_json::from_str(&content) {
             return Ok(parsed);
@@ -64,7 +88,7 @@ fn load_from_cache_or_eval<V: DeserializeOwned>(
         }
     }
 
-    let command = run_nix_str(nix_code);
+    let command = run_nix_str_with_args(nix_code, args);
     match command {
         Ok(output) => {
             if output.status.success() {
@@ -91,16 +115,21 @@ pub fn get_available_nixos_configurations(flake_path: &str) -> Option<Vec<String
 
 pub fn get_options() -> Result<super::parse::NixValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixos.json");
-    // TODO: Fix this horrible hack inlining ./utilities.nix
-    let text = format!("let utilities =\n{UTILITIES_NIX};\nin\n{EXTRACT_NIX}");
 
-    load_from_cache_or_eval(text.as_str(), cache_file)
+    let args = [(false, "utilities", UTILITIES_NIX)];
+    load_from_cache_or_eval(EXTRACT_NIX, args, cache_file)
 }
 
-pub fn get_config(flake: &str, hostname: &str) -> Result<super::parse::NixGuardedValue, LoadJsonError> {
+pub fn get_config(
+    flake: &str,
+    hostname: &str,
+) -> Result<super::parse::NixGuardedValue, LoadJsonError> {
     let cache_file = Path::new("/tmp/nixosConfig.json");
-    // TODO: Fix this horrible hack inlining ./utilities.nix
-    let text = format!("let utilities =\n{UTILITIES_NIX};\nflakePath = \"{flake}\";hostname = \"{hostname}\";\nin\n{EXTRACT_CONFIG_NIX}");
 
-    load_from_cache_or_eval(text.as_str(), cache_file)
+    let args = [
+        (false, "utilities", UTILITIES_NIX),
+        (true, "flakePath", flake),
+        (true, "hostname", hostname),
+    ];
+    load_from_cache_or_eval(EXTRACT_CONFIG_NIX, args, cache_file)
 }
