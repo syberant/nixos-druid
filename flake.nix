@@ -21,7 +21,7 @@
           src = ./.;
           cargoSha256 = "sha256-tfJnq5jE+QlnthOwVz7munIsIoq8Z+qQrs3AJeqltCs=";
 
-          nativeBuildInputs = with pkgs; [ pkgconfig ];
+          nativeBuildInputs = with pkgs; [ pkgconfig wrapGAppsHook glib ];
           buildInputs = with pkgs; [ gtk3 ];
           cargoBuildFlags = [ "--bin" "nixos-option-browser" "--bin" "nixos-config-browser" ];
 

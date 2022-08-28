@@ -1,20 +1,25 @@
 // This entire file is quite horrible honestly but it (mostly) works,
 // is nicely isolated and can easily be replaced in the future.
 
-use druid::widget::{Button, Flex, Label, TextBox, Widget};
-use druid::{AppLauncher, Data, Lens, LocalizedString, Selector, WidgetExt, WindowDesc};
+fn main() {}
+
+use druid::commands::SHOW_OPEN_PANEL;
+use druid::widget::{Button, Controller, Flex, Label, TextBox, ViewSwitcher, Widget};
+use druid::{
+    AppDelegate, AppLauncher, Data, FileDialogOptions, Lens, LensExt, LocalizedString, Selector,
+    WidgetExt, WindowDesc,
+};
 use druid_widget_nursery::ListSelect;
+use nixos_druid::controller::DisabledController;
 use nixos_druid::run::get_available_nixos_configurations;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-const RESET_HOSTNAMES: Selector = Selector::new("flake-select.reset-hostnames");
-
 #[derive(Clone, Data, Lens)]
 pub struct SelectData {
-    flake_location: Arc<String>,
+    flake_location: String,
     hostname: Option<String>,
     /// This is just used to export the data so we can use it after the window is closed.
     #[data(ignore)]
@@ -40,118 +45,82 @@ impl SelectData {
     }
 }
 
-struct HostnameSelectorWidget(Box<dyn Widget<SelectData>>);
+struct SelectionDelegate;
 
-impl HostnameSelectorWidget {
-    fn new_from_list(list: Vec<(String, Option<String>)>) -> Box<dyn Widget<SelectData>> {
-        Box::new(ListSelect::new(list).lens(SelectData::hostname))
-    }
-
-    fn new_from_data(data: &SelectData) -> Self {
-        let hostnames: Vec<(String, Option<String>)> = if let Some(available) =
-            get_available_nixos_configurations(data.flake_location.as_ref())
-        {
-            available
-                .into_iter()
-                .map(|host: String| (host.clone(), Some(String::from(host))))
-                .chain(vec![("Please select a hostname".to_string(), None)])
-                .collect()
-        } else {
-            vec![("Please select a system flake".to_string(), None)]
-        };
-
-        Self(Self::new_from_list(hostnames))
-    }
-}
-
-impl Widget<SelectData> for HostnameSelectorWidget {
-    fn event(
+impl AppDelegate<SelectData> for SelectionDelegate {
+    fn command(
         &mut self,
-        ctx: &mut druid::EventCtx,
-        event: &druid::Event,
+        _ctx: &mut druid::DelegateCtx,
+        _target: druid::Target,
+        cmd: &druid::Command,
         data: &mut SelectData,
-        env: &druid::Env,
-    ) {
-        let new_event = match event {
-            druid::Event::Command(cmd) if cmd.is(RESET_HOSTNAMES) => {
-                // Flake location changed, regenerate hostname picker
-                *self = Self::new_from_data(data);
-                // Old hostnames not valid anymore, reset to None
-                data.hostname = None;
+        _env: &druid::Env,
+    ) -> druid::Handled {
+        use druid::commands::OPEN_FILE;
+        use druid::Handled::*;
 
-                ctx.set_handled();
-                None
+        match cmd {
+            cmd if cmd.is(OPEN_FILE) => {
+                let info = cmd.get(OPEN_FILE).unwrap();
+                let path = info.path.to_str().unwrap().to_string();
+
+                data.flake_location = path;
+
+                Yes
             }
-            x => Some(x),
-        };
-        if let Some(ev) = new_event {
-            self.0.event(ctx, ev, data, env);
+            _ => No,
         }
-    }
-
-    fn lifecycle(
-        &mut self,
-        ctx: &mut druid::LifeCycleCtx,
-        event: &druid::LifeCycle,
-        data: &SelectData,
-        env: &druid::Env,
-    ) {
-        self.0.lifecycle(ctx, event, data, env);
-    }
-
-    fn update(
-        &mut self,
-        ctx: &mut druid::UpdateCtx,
-        old_data: &SelectData,
-        data: &SelectData,
-        env: &druid::Env,
-    ) {
-        if !data.flake_location.same(&old_data.flake_location) {
-            ctx.submit_command(RESET_HOSTNAMES);
-        }
-
-        self.0.update(ctx, old_data, data, env);
-    }
-
-    fn layout(
-        &mut self,
-        ctx: &mut druid::LayoutCtx,
-        bc: &druid::BoxConstraints,
-        data: &SelectData,
-        env: &druid::Env,
-    ) -> druid::Size {
-        self.0.layout(ctx, bc, data, env)
-    }
-
-    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &SelectData, env: &druid::Env) {
-        self.0.paint(ctx, data, env);
     }
 }
 
 // TODO: Use controller with `LifeCycle::WidgetAdded` to eliminate argument `data` here
-fn ui_builder(data: &SelectData) -> impl Widget<SelectData> {
+fn ui_builder() -> impl Widget<SelectData> {
     let select_flake = Flex::row()
         .with_child(Label::new("Select the location of your system flake: "))
         .with_child(
-            TextBox::new()
+            // TextBox::new().with_placeholder("/etc/nixos")
             // Or use a file dialog, but I think a TextBox may be both easier and nicer here
-            // Button::dynamic(|data: &ArcStr, _| data.to_string()).on_click(|ctx, _data, _env| {
-                // // Select a file
-                // let options = FileDialogOptions::new()
-                    // .select_directories()
-                    // .title("Select location of system flake");
-                // ctx.submit_command(SHOW_OPEN_PANEL.with(options))
-            // }),
-        )
-        .lens(SelectData::flake_location);
+            Button::dynamic(|data: &String, _| {
+                if get_available_nixos_configurations(data.as_ref()).is_none() {
+                    "Choose flake".to_string()
+                } else {
+                    data.to_string()
+                }
+            })
+            .on_click(|ctx, _data, _env| {
+                // Select a file
+                let options = FileDialogOptions::new()
+                    .select_directories()
+                    .title("Select location of system flake");
+                ctx.submit_command(SHOW_OPEN_PANEL.with(options))
+            })
+            .lens(SelectData::flake_location),
+        );
 
     let select_hostname = Flex::row()
         .with_child(Label::new("Select the particular `nixosConfiguration`: "))
-        .with_child(HostnameSelectorWidget::new_from_data(data));
+        .with_child(ViewSwitcher::new(
+            |dat: &SelectData, _env| dat.flake_location.clone(),
+            |path: &String, _dat, _env| {
+                let mut list: Vec<(String, Option<String>)> = vec![("---".to_string(), None)];
 
-    let control_buttons = Flex::row().with_child(Button::new("Select").on_click(
-        |ctx, data: &mut SelectData, _env| {
-            if data.hostname != None {
+                if let Some(available) = get_available_nixos_configurations(path.as_ref()) {
+                    list.extend(
+                        available
+                            .into_iter()
+                            .map(|host: String| (host.clone(), Some(String::from(host)))),
+                    )
+                }
+
+                Box::new(ListSelect::new(list).lens(SelectData::hostname))
+            },
+        ));
+
+    let control_buttons = Flex::row()
+        .with_child(
+            Button::new("Select").on_click(|ctx, data: &mut SelectData, _env| {
+                // This assumes we are outputting valid data
+                // If data is invalid this button should be "disabled" which is the controllers job
                 let new = data.clone();
                 *data
                     .output
@@ -161,9 +130,11 @@ fn ui_builder(data: &SelectData) -> impl Widget<SelectData> {
                     .borrow_mut() = new;
 
                 ctx.window().close();
-            }
-        },
-    ));
+            }),
+        )
+        .controller(DisabledController::new(
+            SelectData::hostname.map(|x| x.is_none(), |_, _| unimplemented!()),
+        ));
 
     Flex::column()
         .with_child(select_flake)
@@ -174,16 +145,16 @@ fn ui_builder(data: &SelectData) -> impl Widget<SelectData> {
 pub fn select_hostname() -> SelectData {
     let output = Rc::new(RefCell::new(SelectData {
         hostname: None,
-        flake_location: Arc::new(String::new()),
+        flake_location: String::new(),
         output: None,
     }));
     let data = SelectData {
         hostname: None,
-        flake_location: Arc::new(String::from("/etc/nixos")),
+        flake_location: String::new(),
         output: Some(Rc::clone(&output)),
     };
 
-    let window = WindowDesc::new(ui_builder(&data))
+    let window = WindowDesc::new(ui_builder())
         .window_size((400.0, 400.0))
         .title(
             LocalizedString::new("nixos-select-window-title")
@@ -191,6 +162,7 @@ pub fn select_hostname() -> SelectData {
         );
 
     AppLauncher::with_window(window)
+        .delegate(SelectionDelegate)
         .launch(data)
         .expect("Launching selection window failed");
 
