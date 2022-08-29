@@ -5,7 +5,21 @@ with lib;
 
 rec {
   # Extract the text from sets of the form `{ _type = "literalExpression"; text = <something>; }`
-      extractLiteralExpression = expr: if ((expr._type or null) == "literalExpression") then expr.text else expr;
+  extractLiteralExpression = expr:
+    if ((expr._type or null) == "literalExpression") then expr.text else expr;
+
+
+  # Visibility related functions
+  isVisibleNameValue = name: v:
+    if name == "_module" then
+      false
+    else if isOption v then
+      isVisibleOption v
+    else
+      true;
+  isVisibleOption = { visible ? true, internal ? false, ... }@opt:
+    (if isString visible then visible == "shallow" else visible) && !internal;
+
 
   # Guard methods, they take a function for easy composability
   guardTryEval = f: v:
@@ -19,8 +33,7 @@ rec {
     } else
       f v;
   guardFunction = f: v: if (isFunction v) then { _function = true; } else f v;
-  guardOptionType = f: v:
-    if (isOptionType v) then { _type = true; } else f v;
+  guardOptionType = f: v: if (isOptionType v) then { _type = true; } else f v;
 
   # Recursively call on elements of product types with given function
   recurseWith = f: val:
@@ -34,6 +47,8 @@ rec {
     (guardFunction (guardOptionType (recurseWith catchErrors))));
 
   # Guard against values that don't make sense in JSON
-  catchJson = guardDerivation (guardFunction (guardOptionType (recurseWith catchJson)));
-  catchJsonLeaveOption = guardDerivation (guardFunction (recurseWith catchJson));
+  catchJson =
+    guardDerivation (guardFunction (guardOptionType (recurseWith catchJson)));
+  catchJsonLeaveOption =
+    guardDerivation (guardFunction (recurseWith catchJson));
 }
